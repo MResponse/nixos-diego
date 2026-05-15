@@ -9,6 +9,7 @@
   imports = [
     ../../modules/desktop.nix
     ../../modules/gaming.nix
+    ./gaming.nix
     ./hardware.nix
     ./services.nix
   ];
