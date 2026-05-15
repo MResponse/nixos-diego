@@ -5,3 +5,10 @@ tmp/
 .stfolder
 result
 result-*
+
+# editor swap/backup files
+*.swp
+*.swo
+*~
+.*.swp
+.*.swo
