@@ -8,5 +8,6 @@
 
   environment.systemPackages = with pkgs; [
     keepassxc
+    thunderbird-latest
   ];
 }
