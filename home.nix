@@ -23,6 +23,8 @@
     ./hm-modules/zellij.nix
     ./hm-modules/caelestia.nix
     ./hm-modules/services.nix
+    ./hm-modules/keepmenu.nix
+    ./hm-modules/darkman.nix
     inputs.caelestia-shell.homeManagerModules.default
   ];
 

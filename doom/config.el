@@ -770,6 +770,7 @@
 ;; (`:style flat-button` doesn't render on PGTK, so we fake it with bg + box color)
 (defun my/org-agenda-style-super-agenda-headers ()
   "Apply box styling to org-super-agenda group headers after theme loads."
+  (require 'modus-themes)
   (modus-themes-with-colors
     (set-face-attribute 'org-super-agenda-header nil
                         :inherit nil

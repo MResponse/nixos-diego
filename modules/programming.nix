@@ -18,9 +18,8 @@
         beautifulsoup4
         pyflakes # TODO: ruff replaces this — remove once ruff is confirmed working
         debugpy
-        torchWithCuda
+        torch
         transformers
-        pynvml
 
         # ML / data science
         jupyter

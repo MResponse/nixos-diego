@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 
 {
   environment.systemPackages = with pkgs; [
@@ -36,7 +36,7 @@
     nmap
     ipcalc
     mullvad-vpn
-
+    zen-browser
     # Base system utilities
     file
     which
@@ -76,6 +76,7 @@
     strace
     ltrace
     lsof
+    claude-code
 
     # Media tools (server has media stack too)
     mediainfo

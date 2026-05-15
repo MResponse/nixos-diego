@@ -9,7 +9,9 @@
       cheat = "cht.sh";
       c = "cht.sh";
       cd = "z";
-      switch = "sudo nixos-rebuild switch";
+      switch = "sudo nixos-rebuild switch --flake ~/nixos-config#$(hostname)";
+      boot = "sudo nixos-rebuild boot --flake ~/nixos-config#$(hostname)";
+      test-switch = "sudo nixos-rebuild test --flake ~/nixos-config#$(hostname)";
       ccs = "codecrafters submit";
       cct = "codecrafters test";
       nano = "nvim";

@@ -32,6 +32,11 @@
     hyprland.url = "git+https://github.com/hyprwm/Hyprland?submodules=1";
     nil.url = "github:oxalica/nil";
 
+    zen-browser = {
+      url = "github:youwen5/zen-browser-flake";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     lsfg-vk-flake = {
       url = "github:pabloaul/lsfg-vk-flake/main";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -62,9 +67,9 @@
       ...
     }@inputs:
     let
-      username = "vincenzo";
-      fullName = "Vincenzo Pace";
-      mail = "vincenzo.pace94@icloud.com";
+      username = "marius";
+      fullName = "Marius Respondek";
+      mail = "marius@grafikus.de";
       system = "x86_64-linux";
 
       # Packages from nixpkgs/master that aren't yet in nixos-unstable
@@ -78,6 +83,7 @@
         (final: prev: {
           claude-code = unstablePkgs.claude-code;
           zed-editor = unstablePkgs.zed-editor;
+          zen-browser = inputs.zen-browser.packages.${system}.zen-browser;
         })
       ];
 
@@ -121,6 +127,7 @@
       nixosConfigurations = {
         dracula = mkDesktopHost "dracula";
         alucard = mkServerHost "alucard";
+	nixos-diego = mkDesktopHost "nixos-diego";
       };
     };
 }

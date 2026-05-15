@@ -82,6 +82,18 @@
     yt-dlp
     poppler-utils
     glow
+    btop
+    pavucontrol
+    blueman
+    vscodium
+    hyprpicker
+    ydotool
+    nemo
+    lxqt.qps
+    imv
+    glib
+    wofi
+
 
     # Media
     nsxiv
@@ -105,5 +117,7 @@
     slack
     signal-desktop
     teams-for-linux
+    telegram-desktop
+    whatsapp-electron
   ];
 }
