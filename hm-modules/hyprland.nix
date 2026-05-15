@@ -12,6 +12,72 @@
 #   - Borders/Gaps/Opacity: Marius-Werte   — Tier 3 Visuals
 #   - 22 Launcher-Bindings: siehe HANDOVER — Frage 4.1–4.22
 #   - Movement (focus/window/workspace): Marius-Schema (Pfeiltasten)
+let
+  # Alt+V → take the image currently on the Wayland clipboard, save it to
+  # /tmp, then *replace* the clipboard contents with the file path as text.
+  # User then presses Ctrl+V normally in Warp/Claude Code to paste the path.
+  #
+  # Why not type the path directly with wtype? wtype emits raw keysyms via
+  # the virtual-keyboard-v1 protocol. The Compositor still sees the physical
+  # Alt as held during typing, so each character gets re-interpreted as an
+  # Alt+<key> shortcut (Warp/Hyprland/Claude eat or remap it). Documented
+  # workaround in the Hyprland community: don't type, hand off via clipboard.
+  # https://bbs.archlinux.org/viewtopic.php?id=303538
+  cc-paste-image = pkgs.writeShellApplication {
+    name = "cc-paste-image";
+    runtimeInputs = with pkgs; [
+      wl-clipboard
+      libnotify
+      coreutils
+    ];
+    text = ''
+      ts=$(date +%Y%m%d%H%M%S)
+      out="/tmp/cc-paste-''${ts}.png"
+      log=/tmp/cc-paste.log
+
+      {
+        echo "[$(date -Iseconds)] start"
+
+        if wl-paste --list-types 2>/dev/null | grep -q '^image/'; then
+          wl-paste --type image/png > "$out" 2>/dev/null || true
+          echo "  source=clipboard size=$(stat -c%s "$out" 2>/dev/null || echo 0)"
+        fi
+
+        if [ ! -s "$out" ]; then
+          cache="$HOME/.cache/caelestia/screenshots"
+          if [ -d "$cache" ]; then
+            # find -printf '%T@ %p' → mtime + path, sort newest-first
+            latest=$(find "$cache" -maxdepth 1 -type f -printf '%T@ %p\n' 2>/dev/null \
+                     | sort -rn | head -1 | cut -d' ' -f2-)
+            if [ -n "$latest" ] && [ -s "$latest" ]; then
+              cp "$latest" "$out"
+              echo "  source=cache file=$latest"
+            fi
+          fi
+        fi
+      } >> "$log"
+
+      if [ ! -s "$out" ]; then
+        notify-send -u normal -i image-x-generic-symbolic \
+          "cc-paste" "No image in clipboard or screenshot cache"
+        echo "  FAIL: no image source" >> "$log"
+        exit 1
+      fi
+
+      # Replace clipboard contents with the file path as text. User then
+      # presses Ctrl+V (Warp's normal paste) to insert the path into the
+      # focused prompt — works in any app, no Alt-modifier race.
+      printf '%s ' "$out" | wl-copy --type text/plain
+      notify-send -u low -i image-x-generic-symbolic \
+        -h "STRING:image-path:$out" \
+        "Screenshot ready" "Pfad im Clipboard — Ctrl+V zum Einfügen"
+      {
+        echo "  path copied to clipboard: $out"
+        echo "[$(date -Iseconds)] done"
+      } >> "$log"
+    '';
+  };
+in
 {
   wayland.windowManager.hyprland = {
     enable = true;
@@ -112,28 +178,14 @@
 
       "$mod" = "SUPER";
 
-      # ----------------------------------------------------------------------
-      # Super-Tap Launcher (bindi/bindin Magic — siehe HANDOVER §Launcher)
-      # ----------------------------------------------------------------------
-      bindi = [
-        "$mod, SUPER_L, global, caelestia:launcher"
-      ];
-      # `catchall` keybinds are only valid inside `submap` blocks (Hyprland
-      # 0.54+ enforces this strictly). The Caelestia-upstream Super-tap pattern
-      # used to rely on a global catchall to cancel the pending launcher on
-      # any other key — drop it here and keep only the explicit mouse-button
-      # interrupts. The `bindi` line below still handles tap-vs-hold detection
-      # via SUPER_L release semantics, so the launcher remains responsive.
-      bindin = [
-        "$mod, mouse:272, global, caelestia:launcherInterrupt"
-        "$mod, mouse:273, global, caelestia:launcherInterrupt"
-        "$mod, mouse:274, global, caelestia:launcherInterrupt"
-        "$mod, mouse_up, global, caelestia:launcherInterrupt"
-        "$mod, mouse_down, global, caelestia:launcherInterrupt"
-      ];
+      # Super-Tap-Launcher entfernt — Marius wollte nicht dass Super-allein
+      # den Launcher öffnet (zu viele Fehlauslöser). Launcher liegt jetzt
+      # explizit auf Super+R im bind-Block unten. bindi/bindin-Pattern raus,
+      # die mouse-Interrupts waren nur Tap-Cancel und ohne bindi obsolet.
 
       bind = [
         # ── Caelestia Shell Integrations ─────────────────────────
+        "$mod, R, global, caelestia:launcher"
         "CTRL ALT, Delete, global, caelestia:session"
         "CTRL ALT, C, global, caelestia:clearNotifs"
         "$mod, K, global, caelestia:showall"
@@ -243,7 +295,7 @@
         "CTRL SHIFT, Escape, exec, caelestia toggle sysmon"
         "$mod, D, exec, caelestia toggle communication"
         # Music-Toggle entfällt (Super+M → thunderbird, Frage 4.16)
-        # Todo-Toggle entfällt (Super+R frei, Frage 4.17)
+        # Todo-Toggle entfällt (Super+R jetzt = Launcher, siehe oben)
 
         # ── App Launcher (Frage 4.1-4.22) ────────────────────────
         # Marius wins
@@ -286,15 +338,21 @@
 
         # ── Screenshots / Recording (Frage 4.11 — Marius gewinnt Super+Shift+S) ─
         ", Print, exec, caelestia screenshot"                                                # Full screen → clipboard
-        "$mod SHIFT, S, global, caelestia:screenshotFreeze"                                  # 4.11 — Region freeze
-        "$mod SHIFT ALT, S, global, caelestia:screenshot"                                    # Region live
+        # Direkt-ins-Clipboard-Varianten (umgehen swappy — der ist auf Diego
+        # nicht installiert). Wenn du mal Annotation willst: `swappy` zur
+        # NixOS-Config hinzufügen und auf `screenshotFreeze` / `screenshot`
+        # zurück switchen.
+        "$mod SHIFT, S, global, caelestia:screenshotFreezeClip"                              # 4.11 — Region freeze → Clipboard
+        "$mod SHIFT ALT, S, global, caelestia:screenshotClip"                                # Region live → Clipboard
         "$mod ALT, R, exec, caelestia record -s"                                             # Record with sound
         "CTRL ALT, R, exec, caelestia record"                                                # Record screen
         "$mod SHIFT ALT, R, exec, caelestia record -r"                                       # Record region
 
         # ── Alternate paste (Marius Bonus) ───────────────────────
         "CTRL SHIFT ALT, V, exec, sh -c 'sleep 0.5s && ydotool type -d 1 \"$(cliphist list | head -1 | cliphist decode)\"'"
-        "ALT, V, exec, /home/marius/nixos-config/scripts/cc-paste-image.sh"                  # Marius — paste image from clipboard as file path (Claude Code / Warp)
+        # Alt+V: convert image-clipboard → file path in clipboard
+        # (Skript-Definition oben im let-block). User danach Ctrl+V.
+        "ALT, V, exec, ${cc-paste-image}/bin/cc-paste-image"
 
         # ── Testing ──────────────────────────────────────────────
         "$mod ALT, F12, exec, notify-send -u low -i dialog-information-symbolic 'Test notification' \"Here's a really long message to test truncation and wrapping\\nYou can middle click or flick this notification to dismiss it!\" -a 'Shell' -A 'Test1=I got it!' -A 'Test2=Another action'"
@@ -321,6 +379,7 @@
         ", XF86AudioMute, exec, wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
         ", XF86AudioMicMute, exec, wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
       ];
+
 
       # ──────────────────────────────────────────────────────────
       # Window Rules — Special Workspace Routing (Marius pattern)
