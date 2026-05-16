@@ -6,6 +6,13 @@
     autoPrune.enable = true;
   };
 
+  # UPower D-Bus daemon — Caelestia's BatteryMonitor.qml und der Bar-Battery-Indicator
+  # konsumieren `Quickshell.Services.UPower`, das ohne laufenden upower.service keinen
+  # displayDevice liefert (BAT0 ist im Kernel da, aber Quickshell kennt nur die UPower-
+  # Abstraktion). Ohne diesen Eintrag bleibt `bar.status.showBattery = true` wirkungslos.
+  # Diego-spezifisch (Laptop) — Donvini's dracula ist Tower ohne Akku und braucht das nicht.
+  services.upower.enable = true;
+
   environment.systemPackages = with pkgs; [
     keepassxc
     thunderbird-latest
