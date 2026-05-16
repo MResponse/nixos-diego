@@ -1,4 +1,9 @@
-{ pkgs, ... }:
+{
+  pkgs,
+  lib,
+  osConfig,
+  ...
+}:
 # Hyprland config for Nixos-Diego — Marius's keybinds ported onto donvini's
 # NixOS base. See HANDOVER.md for full decision history (Frage 1–13 +
 # 22 Launcher-Konflikte) and target file location.
@@ -105,6 +110,8 @@ in
       cursor.no_hardware_cursors = true;
 
       exec-once = [
+        "/run/current-system/sw/libexec/polkit-kde-authentication-agent-1"
+        "keepassxc /home/marius/Syncthing_lighteningv1.0/Organisatorisches/MRPrivat.kdbx"
         "nm-applet --indicator"
         "wl-paste --type text --watch cliphist store -max-items 100 -max-size 2000000"
         "wl-paste --type image --watch cliphist store -max-items 100 -max-size 2000000"
@@ -300,7 +307,7 @@ in
         # ── App Launcher (Frage 4.1-4.22) ────────────────────────
         # Marius wins
         "$mod, T, exec, app2unit -- kitty"                                                   # 4.13 — Terminal
-        "$mod, W, exec, app2unit -- zen-browser"                                             # 4.14 — Browser (moved from B)
+        "$mod, W, exec, app2unit -- zen"                                                     # 4.14 — Browser (moved from B)
         "$mod, V, exec, caelestia clipboard"                                                 # 4.21 — Clipboard
         "$mod ALT, V, exec, caelestia clipboard -d"                                          # Marius Bonus
         "$mod, period, exec, caelestia emoji -p"                                             # Marius Bonus
@@ -356,6 +363,29 @@ in
 
         # ── Testing ──────────────────────────────────────────────
         "$mod ALT, F12, exec, notify-send -u low -i dialog-information-symbolic 'Test notification' \"Here's a really long message to test truncation and wrapping\\nYou can middle click or flick this notification to dismiss it!\" -a 'Shell' -A 'Test1=I got it!' -A 'Test2=Another action'"
+      ]
+      # ── Power modes ────────────────────────────────────────────
+      # Five HP-equivalent modes (Smart Sense / Performance / Cool / Quiet /
+      # Power Saver). Only wired in when services.powerModes is enabled at
+      # the system level — keeps this hm-module portable to hosts that don't
+      # ship the engine. See hosts/nixos-diego/power-modes.nix.
+      ++ lib.optionals (osConfig.services.powerModes.enable or false) [
+        "$mod SHIFT, F1, exec, power-mode set smart-sense"
+        "$mod SHIFT, F2, exec, power-mode set performance"
+        "$mod SHIFT, F3, exec, power-mode set cool"
+        "$mod SHIFT, F4, exec, power-mode set quiet"
+        "$mod SHIFT, F5, exec, power-mode set power-saver"
+      ]
+      # ── Gaming Mode ────────────────────────────────────────────
+      # SUPER+SHIFT+G — switch to SteamOS Gaming Mode (gamescope session +
+      # Steam Deck UI). Parallels $mod+G (launch Steam in desktop) — SHIFT
+      # escalates to the full session switch. Bridges Big Picture muscle
+      # memory onto the two-session model: ADR-0005 picked autoStart=false
+      # so Hyprland stays the default boot, and steamosctl is the bridge.
+      # Return path: Steam Power Menu → "Switch to Desktop"
+      # (driven by jovian.steam.desktopSession).
+      ++ lib.optionals (osConfig.jovian.steam.enable or false) [
+        "$mod SHIFT, G, exec, steamosctl switch-to-game-mode"
       ];
 
       # Repeat-fähige Bindings
