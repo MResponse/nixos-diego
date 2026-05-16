@@ -17,6 +17,7 @@
   config,
   lib,
   pkgs,
+  username,
   ...
 }:
 
@@ -153,6 +154,10 @@ let
       STATE_FILE=/var/lib/power-modes/current
       ENV_DIR=/etc/power-modes
 
+      # Modes in ascending order of system performance. Used by `cycle`
+      # and printed in `usage` so the order matches the F1..F5 keybinds.
+      ORDER=(power-saver quiet cool smart-sense performance)
+
       usage() {
         cat <<'EOF'
       power-mode — switch Diego's power mode
@@ -160,10 +165,11 @@ let
       Usage:
         power-mode list            list modes, current starred
         power-mode get             print current mode
+        power-mode cycle           advance to the next mode (ascending power, wraps)
         power-mode set <mode>      apply <mode>
         power-mode show            dump live sysfs values
 
-      Modes: smart-sense | performance | cool | quiet | power-saver
+      Modes (ascending power): power-saver | quiet | cool | smart-sense | performance
       EOF
       }
 
@@ -207,7 +213,29 @@ let
         # Capitalize first letter for the notification title
         local pretty="''${mode^}"
         pretty="''${pretty//-/ }"
-        notify-send -u low -i battery-symbolic "Power mode: $pretty" "Now active" || true
+        # Mode-specific notification icon — absolute path into the bundled
+        # PowerModes theme. notify-send → freedesktop notification spec → the
+        # notifier (Caelestia/dunst/etc.) loads the file directly.
+        local icon="${modeIcons}/share/icons/PowerModes/scalable/status/$mode.svg"
+        notify-send -u low -i "$icon" "Power mode: $pretty" "Now active" || true
+      }
+
+      cmd_cycle() {
+        local current=""
+        [[ -r "$STATE_FILE" ]] && current=$(cat "$STATE_FILE")
+
+        local next=""
+        local i
+        for i in "''${!ORDER[@]}"; do
+          if [[ "''${ORDER[$i]}" == "$current" ]]; then
+            next="''${ORDER[$(( (i + 1) % ''${#ORDER[@]} ))]}"
+            break
+          fi
+        done
+        # No valid current state — start the cycle at the weakest mode.
+        [[ -z "$next" ]] && next="''${ORDER[0]}"
+
+        cmd_set "$next"
       }
 
       cmd_show() {
@@ -235,6 +263,7 @@ let
         list)  cmd_list ;;
         get)   cmd_get ;;
         show)  cmd_show ;;
+        cycle) cmd_cycle ;;
         set)
           shift || true
           [[ $# -eq 1 ]] || { usage; exit 2; }
@@ -268,6 +297,196 @@ let
     esac
     exec ${pkgs.systemd}/bin/systemctl start "power-modes-apply@$mode.service"
   '';
+
+  # 5 SVG icons packaged as a freedesktop icon theme — one per mode. Symbolic
+  # style, `fill="currentColor"` so the bar's icon-recolour picks them up.
+  #
+  # Why a real theme structure (with index.theme and scalable/status/) and not
+  # just a flat dir: SNI publishers can advertise either `IconName` (a
+  # theme-relative name) or raw `IconPixmap` data. AppIndicator's
+  # `set_icon_full(name)` sets IconName — Caelestia's tray (Quickshell's
+  # SystemTray) treats IconName as a theme name and resolves it via the
+  # icon-theme search path declared in `IconThemePath`. Sending an absolute
+  # SVG path as IconName works for some SNI hosts but Quickshell rejects it
+  # silently — the indicator registers but no icon ever paints.
+  #
+  # Pairing this theme with `set_icon_theme_path()` in the Python indicator
+  # makes IconThemePath point here, and `set_icon_full("smart-sense", …)`
+  # then resolves to `scalable/status/smart-sense.svg` via standard XDG
+  # icon-theme lookup.
+  #
+  # Distinct shapes so smart-sense (balanced ppd) and cool (also balanced) are
+  # visually distinguishable at a glance — that's the whole point of the bar
+  # indicator, otherwise hovering the battery popout would suffice.
+  modeIcons = pkgs.runCommand "power-mode-icons" { } ''
+    base=$out/share/icons/PowerModes
+    mkdir -p "$base/scalable/status"
+    cat > "$base/index.theme" <<'EOF'
+    [Icon Theme]
+    Name=PowerModes
+    Comment=Nixos-Diego five-mode power indicators
+    Directories=scalable/status
+
+    [scalable/status]
+    Size=16
+    MinSize=8
+    MaxSize=512
+    Type=Scalable
+    Context=Status
+    EOF
+    cat > "$base/scalable/status/smart-sense.svg" <<'EOF'
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 1 L9 6 L14 7 L9 8 L8 13 L7 8 L2 7 L7 6 Z"/>
+      <circle cx="13" cy="3" r="1"/>
+      <circle cx="3" cy="13" r="1"/>
+    </svg>
+    EOF
+    cat > "$base/scalable/status/performance.svg" <<'EOF'
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 1 L13 8 L10 8 L10 14 L6 14 L6 8 L3 8 Z"/>
+    </svg>
+    EOF
+    cat > "$base/scalable/status/cool.svg" <<'EOF'
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none">
+      <line x1="8" y1="1" x2="8" y2="15"/>
+      <line x1="1" y1="8" x2="15" y2="8"/>
+      <line x1="3" y1="3" x2="13" y2="13"/>
+      <line x1="3" y1="13" x2="13" y2="3"/>
+      <path d="M6 2 L8 4 L10 2 M6 14 L8 12 L10 14 M2 6 L4 8 L2 10 M14 6 L12 8 L14 10"/>
+    </svg>
+    EOF
+    cat > "$base/scalable/status/quiet.svg" <<'EOF'
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M2 6 H5 L9 3 V13 L5 10 H2 Z"/>
+      <path stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" d="M11 6 L15 10 M15 6 L11 10"/>
+    </svg>
+    EOF
+    cat > "$base/scalable/status/power-saver.svg" <<'EOF'
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M2 14 C 2 8, 8 2, 14 2 C 14 8, 8 14, 2 14 Z"/>
+      <path stroke="#000" stroke-opacity="0.4" stroke-width="0.8" fill="none" d="M2 14 L 14 2"/>
+    </svg>
+    EOF
+  '';
+
+  # Absolute path to the theme dir — passed via env var; the indicator hands
+  # it to AppIndicator.set_icon_theme_path which propagates to SNI IconThemePath.
+  modeIconThemePath = "${modeIcons}/share/icons/PowerModes";
+
+  # Python tray indicator. Watches /var/lib/power-modes/current via inotify
+  # (Gio.FileMonitor), updates icon on change, exposes 5-mode right-click menu.
+  # Uses libayatana-appindicator3 — the de-facto SNI library; Caelestia's tray
+  # (Quickshell SystemTray) consumes any StatusNotifierItem on the session bus.
+  indicatorScript = pkgs.writeText "power-mode-indicator.py" ''
+    import os
+    import subprocess
+    import gi
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("AyatanaAppIndicator3", "0.1")
+    from gi.repository import Gtk, AyatanaAppIndicator3 as AppIndicator, Gio
+
+    STATE_FILE = "/var/lib/power-modes/current"
+    ICON_THEME_PATH = os.environ["POWER_MODE_ICON_THEME_PATH"]
+
+    MODES = [
+        ("smart-sense", "Smart Sense"),
+        ("performance", "Performance"),
+        ("cool",        "Cool"),
+        ("quiet",       "Quiet"),
+        ("power-saver", "Power Saver"),
+    ]
+    LABELS = dict(MODES)
+    FALLBACK = "smart-sense"
+
+    def read_mode():
+        try:
+            with open(STATE_FILE) as f:
+                m = f.read().strip()
+            return m if m in LABELS else FALLBACK
+        except OSError:
+            return FALLBACK
+
+    def set_mode(mode):
+        subprocess.Popen(["power-mode", "set", mode])
+
+    class Indicator:
+        def __init__(self):
+            # AppIndicator.Indicator.new() expects an icon *theme name* —
+            # passing an absolute path here causes SNI registration with the
+            # watcher to fail silently. set_icon_theme_path() registers our
+            # bundled theme so set_icon_full(<mode>) can resolve via standard
+            # XDG icon-theme lookup (Caelestia/Quickshell requires this — it
+            # rejects absolute paths in IconName).
+            self.ind = AppIndicator.Indicator.new_with_path(
+                "power-modes-diego",
+                "smart-sense",
+                AppIndicator.IndicatorCategory.HARDWARE,
+                ICON_THEME_PATH,
+            )
+            self.ind.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+
+            # Keep the menu + items as members; PyGObject GC otherwise frees
+            # them after __init__ returns and the indicator silently falls off
+            # the StatusNotifierWatcher.
+            self.menu = Gtk.Menu()
+            self.items = []
+            for mode, label in MODES:
+                item = Gtk.MenuItem(label=label)
+                item.connect("activate", lambda _w, m=mode: set_mode(m))
+                self.menu.append(item)
+                self.items.append(item)
+            self.menu.show_all()
+            self.ind.set_menu(self.menu)
+
+            gfile = Gio.File.new_for_path(STATE_FILE)
+            self.monitor = gfile.monitor_file(Gio.FileMonitorFlags.NONE, None)
+            self.monitor.connect("changed", lambda *_: self.update())
+
+            self.update()
+
+        def update(self):
+            mode = read_mode()
+            self.ind.set_icon_full(mode, LABELS[mode])
+            self.ind.set_title(f"Power mode: {LABELS[mode]}")
+
+    if __name__ == "__main__":
+        # Bind to a name so PyGObject keeps the instance (and the contained
+        # AppIndicator + menu + monitor) alive for the duration of Gtk.main().
+        # Without this, Python's refcount drops to 0 immediately and the SNI
+        # registration never reaches the watcher.
+        indicator = Indicator()  # noqa: F841
+        Gtk.main()
+  '';
+
+  # Launcher: PyGObject + GI typelib paths for AyatanaAppIndicator3 + GTK.
+  # `pygobject3` brings the Python bindings; GI_TYPELIB_PATH must point at the
+  # .typelib files of each library we import (Gtk, AppIndicator, Gio).
+  powerModeIndicator = pkgs.writeShellApplication {
+    name = "power-mode-indicator";
+    runtimeInputs = [
+      (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
+    ];
+    runtimeEnv = {
+      # glib and pango default to their `bin` output (no typelibs there);
+      # other listed packages already default to the right output. Force `.out`
+      # to grab the lib/girepository-1.0 with the actual .typelib files.
+      GI_TYPELIB_PATH = lib.makeSearchPath "lib/girepository-1.0" [
+        pkgs.gtk3
+        pkgs.libayatana-appindicator
+        pkgs.glib.out
+        pkgs.gdk-pixbuf
+        pkgs.pango.out
+        pkgs.atk
+        pkgs.harfbuzz
+        # Provides xlib-2.0.typelib (GTK3 transitively imports xlib via Gdk).
+        pkgs.gobject-introspection
+      ];
+      POWER_MODE_ICON_THEME_PATH = modeIconThemePath;
+    };
+    text = ''
+      exec python3 ${indicatorScript}
+    '';
+  };
 
 in
 {
@@ -503,5 +722,32 @@ in
         return polkit.Result.YES;
       });
     '';
+
+    # SNI tray indicator — user-level service that exposes the current power
+    # mode as a StatusNotifierItem on the session bus. Caelestia's tray slot
+    # consumes any SNI publisher and renders it next to Discord/etc., so the
+    # mode is visible at-a-glance and right-clickable for direct switching.
+    #
+    # Replaces the pre-UPower "rocket fallback" the Battery slot rendered when
+    # Caelestia thought no laptop battery was present — that fallback was tied
+    # to ppd profile (3 values), this is tied to the actual 5-mode state.
+    home-manager.users."${username}" = {
+      systemd.user.services.power-mode-indicator = {
+        Unit = {
+          Description = "Power Mode Tray Indicator (5-mode Diego)";
+          After = [ "graphical-session.target" ];
+          PartOf = [ "graphical-session.target" ];
+        };
+        Service = {
+          Type = "exec";
+          ExecStart = "${powerModeIndicator}/bin/power-mode-indicator";
+          Restart = "on-failure";
+          RestartSec = "5s";
+        };
+        Install = {
+          WantedBy = [ "graphical-session.target" ];
+        };
+      };
+    };
   };
 }
