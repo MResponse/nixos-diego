@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 # Caelestia config for Nixos-Diego — Marius's settings ported onto donvini's
 # base. See HANDOVER.md for full decision history.
@@ -65,15 +65,12 @@
       };
 
       notifs.expire = true;
-      lock.sizes.heightMult = 1.0;
       launcher.showOnHover = false;  # Marius
 
-      # WICHTIG: Pfad anpassen bevor erster Switch!
-      # Marius nutzt Syncthing für Wallpaper. Falls Syncthing auf Diego eingerichtet:
-      #   /home/marius/Syncthing_lighteningv1.0/undefined/Wallpaper/Wallpaper New/dark
-      # Falls noch nicht: donvini's wallpapers-Ordner als Fallback:
+      # Wallpaper-Pfad (Syncthing-Mount). Nur `paths.wallpaperDir` ist im aktuellen
+      # Caelestia-Schema gültig — `services.wallpapers.path` wurde entfernt (lebte
+      # in einer älteren Version, jetzt unbekannt → "Unknown option in config"-Toast).
       paths.wallpaperDir = "/home/marius/Syncthing_lighteningv1.0/undefined/Wallpaper/Wallpaper New/dark";
-      services.wallpapers.path = "/home/marius/Syncthing_lighteningv1.0/undefined/Wallpaper/Wallpaper New/dark";
     };
     cli = {
       enable = true;
@@ -84,6 +81,27 @@
       };
     };
   };
+
+  # ~/.config/caelestia/shell.json schreibbar machen.
+  #
+  # Caelestia's RootConfig::setupFileBackend (rootconfig.cpp:56) verdrahtet auto-save
+  # auf jede Property-Änderung — gpuType-Detection, OSD-Slider, Wallpaper-Service-
+  # Tracking, usw. HM legt die Datei aber als Nix-Store-Symlink (read-only) ab, also
+  # loggt jeder Speicherversuch "Failed to write … Read-only file system" und feuert
+  # einen "Failed to save config"-Toast (sichtbar nach jedem caelestia-Restart).
+  #
+  # Fix: nach HM's writeBoundary den Symlink durch eine reguläre, schreibbare Kopie
+  # mit identischem Inhalt ersetzen. Nix bleibt Source of Truth — jeder `switch`
+  # überschreibt die Datei mit dem aktuellen HM-Seed; Runtime-Tweaks via UI
+  # überleben bis zum nächsten Rebuild (deklarativer Vertrag).
+  home.activation.makeCaelestiaShellJsonWritable = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    target="${config.xdg.configHome}/caelestia/shell.json"
+    if [ -L "$target" ]; then
+      src=$(readlink -f "$target")
+      run rm -f "$target"
+      run install -m 644 "$src" "$target"
+    fi
+  '';
 
   # Caelestia runtime dependencies (donvini-list + Marius additions)
   home.packages = with pkgs; [
