@@ -1,4 +1,4 @@
-{ lib, config, ... }:
+{ lib, config, pkgs, ... }:
 
 {
   # NixOS-Built-in Steam-Wayland-Session deaktivieren (Donvinis modules/gaming.nix
@@ -33,9 +33,14 @@
     steam = {
       enable = true;
       autoStart = false;
-      # Verweis statt String-Literal: wenn Donvini je auf UWSM umstellt
-      # (defaultSession="hyprland-uwsm"), zieht Diego automatisch mit.
-      desktopSession = config.services.displayManager.defaultSession;
+      # NOTE: `jovian.steam.desktopSession` is deliberately NOT set here.
+      # autostart.nix:106 reads cfg.desktopSession exactly once, inside
+      # `mkIf cfg.autoStart` — with autoStart=false it's dead Nix code and
+      # Jovian itself emits an eval warning if we set it. The runtime
+      # mechanism is `steamosctl set-default-desktop-session`, which writes
+      # to ~/.local/state/steamos-manager/state.toml; we replicate Jovian's
+      # oneshot below (`systemd.user.services.set-steamos-desktop-session`),
+      # un-gated on autoStart so the value propagates on every login.
       user = "marius";
     };
 
@@ -68,4 +73,26 @@
     "amd_iommu=on"
     "iommu=pt"
   ];
+
+  # Pin the default desktop session for steamos-manager. Without this,
+  # the Power-Menu's "Switch to Desktop" fails with
+  # `I/O error: No such file or directory` because steamos-manager's
+  # state file `~/.local/state/steamos-manager/state.toml` doesn't exist
+  # yet. Jovian's autostart.nix:106 provisions an identical oneshot but
+  # only under `mkIf cfg.autoStart`. We're on autoStart=false so we
+  # replicate it ourselves, un-gated, value derived from
+  # services.displayManager.defaultSession so a future swap to
+  # hyprland-uwsm pulls through automatically.
+  systemd.user.services.set-steamos-desktop-session = {
+    description = "Pin steamos-manager default desktop session";
+    wants = [ "steamos-manager.service" ];
+    after = [ "steamos-manager.service" ];
+    wantedBy = [ "graphical-session.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart =
+        "${pkgs.steamos-manager}/bin/steamosctl set-default-desktop-session "
+        + "${config.services.displayManager.defaultSession}.desktop";
+    };
+  };
 }
