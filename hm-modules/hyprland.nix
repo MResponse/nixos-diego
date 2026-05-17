@@ -409,7 +409,19 @@ in
       # "go gaming" to "no, I want Steam *here* in Hyprland". Non-jovian
       # hosts keep donvini's original $mod, G binding (block below).
       ++ lib.optionals (osConfig.jovian.steam.enable or false) [
-        "$mod, G, exec, steamosctl switch-to-game-mode"                                      # SteamOS Gaming Mode session
+        # Plan-0003 F6: optional Bluetooth pre-disconnect before SUPER+G.
+        # When diego.gaming.disconnectBluetoothBeforeSwitch is true, drop any
+        # connected A2DP/HFP devices first so BlueZ's synchronous teardown
+        # isn't on the session-switch critical path. With no connected
+        # devices, bluetoothctl disconnect exits 1 silently — the `;` (not
+        # `&&`) keeps the steamosctl call unconditional. let-in-list verified
+        # via nix-instantiate --eval --strict 2026-05-17 23:35.
+        (let
+          cmd =
+            if (osConfig.diego.gaming.disconnectBluetoothBeforeSwitch or false)
+            then "${pkgs.bluez}/bin/bluetoothctl disconnect; steamosctl switch-to-game-mode"
+            else "steamosctl switch-to-game-mode";
+        in "$mod, G, exec, ${cmd}")
         "$mod SHIFT, G, exec, mangohud steam"                                                # 4.4 — Steam in desktop (escalation)
       ]
       ++ lib.optionals (!(osConfig.jovian.steam.enable or false)) [

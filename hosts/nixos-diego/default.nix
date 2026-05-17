@@ -130,7 +130,51 @@
   services.displayManager.sddm = lib.mkIf config.jovian.steam.enable {
     enable = true;
     wayland.enable = true;
+    # Plan-0003 F5: cursor settings live in [Theme] (verified against SDDM
+    # source — Configuration.h:80-85 has NO [Wayland] CursorTheme key;
+    # Greeter.cpp:104,107 reads mainConfig.Theme.CursorTheme + CursorSize and
+    # exports them as XCURSOR_THEME / XCURSOR_SIZE at Greeter.cpp:151,208).
+    #
+    # libwayland-cursor in the greeter Wayland session resolves the theme
+    # name against /run/current-system/sw/share/icons (system XCURSOR_PATH),
+    # which is why we also need pkgs.bibata-cursors in environment.system-
+    # Packages below — Marius's user-installed Bibata in ~/.local/share/icons/
+    # isn't visible to the sddm user.
+    #
+    # All three SDDM-bundled themes (elarun, maldives, maya) are QtVersion=5
+    # per metadata.desktop and silently fall back on Qt6 SDDM. Cursor still
+    # works on the fallback because Greeter.cpp reads these keys regardless
+    # of which theme is "active". A Qt6-aware theme swap (pkgs.where-is-my-
+    # sddm-theme etc.) is a separate aesthetic concern for a future plan.
+    settings.Theme = {
+      CursorTheme = "Bibata-Modern-Ice";
+      CursorSize  = 24;
+    };
   };
+
+  # Plan-0003 F5: system-install Bibata-Modern-Ice so the SDDM greeter
+  # (running as user `sddm`) can find it. Matches Marius's GTK cursor theme
+  # (~/.config/gtk-3.0/settings.ini) for visual consistency between Hyprland
+  # and the greeter.
+  environment.systemPackages = lib.mkIf config.jovian.steam.enable [
+    pkgs.bibata-cursors
+  ];
+
+  # Plan-0003 F5: remove the stale, unmanaged /etc/sddm.conf.d/theme.conf
+  # (mtime 2026-05-15 12:36, predates current flake; sets [Theme] Current=
+  # maldives which forces fallback every greeter spawn). After removal, SDDM
+  # has no Current= override and uses its built-in default theme. Our cursor
+  # settings via services.displayManager.sddm.settings.Theme above still apply
+  # (different keys, no conflict).
+  system.activationScripts.diego-sddm-stale-theme-conf =
+    lib.mkIf config.jovian.steam.enable {
+      text = ''
+        if [ -f /etc/sddm.conf.d/theme.conf ] && [ ! -L /etc/sddm.conf.d/theme.conf ]; then
+          ${pkgs.coreutils}/bin/rm -f /etc/sddm.conf.d/theme.conf
+        fi
+      '';
+      deps = [ ];
+    };
 
   # Manuelle Provisionierung der steamos.conf — siehe Kommentar oben.
   # Inhalt ist leer; steamos-manager prüft nur die Existenz der Datei

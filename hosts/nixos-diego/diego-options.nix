@@ -30,6 +30,29 @@
     # directly — see the comment block in default.nix above the
     # greeter-preselect units.
 
+    gaming.disconnectBluetoothBeforeSwitch = lib.mkOption {
+      type    = lib.types.bool;
+      default = false;
+      description = ''
+        Plan-0003 F6 — when true, the SUPER+G keybind runs
+        `bluetoothctl disconnect` before invoking
+        `steamosctl switch-to-game-mode`. Saves ~2-4 s of session-switch
+        wall-clock if a Bluetooth A2DP headset is connected (BlueZ's
+        synchronous AVDTP teardown is on the critical path otherwise).
+
+        Trade-off: ALL connected Bluetooth devices get dropped, including
+        keyboards / mice if any. Steam-managed auto-trusted pairing
+        usually reconnects audio devices inside Gamescope within a few
+        seconds. Default false because no headset is paired on Diego as
+        of 2026-05-17; flip to true when you start gaming with one and
+        the switch feels sluggish.
+
+        `bluetoothctl disconnect` with no connected devices exits non-zero
+        silently — the `;` chaining in the keybind keeps the steamosctl
+        call unconditional so this is harmless when no headset is paired.
+      '';
+    };
+
     auth.polkitFingerprint = lib.mkOption {
       type = lib.types.bool;
       default = false;
