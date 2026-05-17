@@ -16,32 +16,19 @@
 {
   options.diego = {
 
-    sessionSwitch.autoLogin = lib.mkOption {
-      type = lib.types.enum [ "session-switch-only" "always" "off" ];
-      default = "session-switch-only";
-      description = ''
-        Controls when SDDM autologin is in effect.
-
-        - "session-switch-only" (DEFAULT, Plan-0001 v7 Option γ):
-          Autologin marker (zzv-diego-session-switch.conf) is written
-          transiently when steamos-manager writes its temp-login file
-          (i.e., during SUPER+G or "Switch to Desktop"). Greeter shown
-          at every cold boot. No re-auth during session switches.
-          Satisfies user goals G3 (no password on session switch) AND
-          G4 (one password at cold boot) simultaneously.
-
-        - "always" (Option α): autologin every cold boot AND every
-          session switch. Greeter shown only on FIRST cold boot
-          (until /var/lib/diego/has-logged-in is touched by the
-          first-login user service). Convenient but violates "greeter
-          every boot" intent. v3 default behavior.
-
-        - "off" (Option β): no autologin ever. Greeter at every cold
-          boot AND at every session switch. Strictly honors "remove
-          autologin" but adds password prompt to every Gamescope
-          round-trip (no-re-auth-on-switch lost).
-      '';
-    };
+    # NOTE: `diego.sessionSwitch.autoLogin` option used to live here. It
+    # gated a runtime-written [Autologin] conf.d entry (Plan-0001 v7
+    # Option γ, commit ee2a57f). That mechanism could never work on
+    # SDDM 0.21 — the daemon loads conf.d once at boot and never
+    # re-reads it, so the transient [Autologin] was invisible to the
+    # autologin gate. The option was removed 2026-05-17 along with the
+    # zzv code. The current implementation in default.nix preselects
+    # the destination session via state.conf instead (user still types
+    # password once per switch, but no need to touch the session
+    # dropdown). For permanent autologin, set the upstream
+    # services.displayManager.{autoLogin,sddm.autoLogin.relogin} options
+    # directly — see the comment block in default.nix above the
+    # greeter-preselect units.
 
     auth.polkitFingerprint = lib.mkOption {
       type = lib.types.bool;

@@ -18,12 +18,13 @@
     # zwei Composition-Patterns in einer Codebase — aber sauberer als die
     # zentrale mkDesktopHost-Liste für einen Single-Host-Eintrag aufzubohren.
     inputs.jovian-nixos.nixosModules.default
-    ./diego-options.nix    # Diego-local Nix options (Plan-0001 v7 §5)
+    ./diego-options.nix      # Diego-local Nix options (Plan-0001 v7 §5)
     ./gaming.nix
     ./hardware.nix
     ./services.nix
     ./security.nix
     ./power-modes.nix
+    ./gamescope-power.nix    # Plan-0002 §2.4 — force `performance` while Gamescope is active
   ];
 
   # Five-mode power management replicating HP's Windows myHP modes
@@ -34,6 +35,48 @@
     enable = true;
     defaultMode = "smart-sense";
   };
+
+  # ── Session-switch speedups (Plan-0002 §2.3) ─────────────────────────
+  #
+  # 1. Disable coredump storage. Electron apps (Discord, Slack, browsers)
+  #    SIGTRAP on shutdown during a session switch; default systemd-coredump
+  #    serializes the full process image to /var/lib/systemd/coredump/,
+  #    blocking the stop transaction. Observed 2026-05-17: ~54 s on a single
+  #    Discord crash. Storage=none + ProcessSizeMax=0 together hit the early
+  #    return in coredump-submit.c:274-277 BEFORE the kernel pipe is drained
+  #    (agent 4 in roast-loop). The journal still logs "process crashed"; we
+  #    just don't keep the core file. Re-enable for debugging via:
+  #      sudo systemctl edit --runtime systemd-coredump@.service
+  systemd.coredump.settings.Coredump = {
+    Storage = "none";
+    ProcessSizeMax = 0;
+  };
+
+  # 2. Bound user-scope app stop timeout. Default 90 s default-timeout means
+  #    heavy desktop apps (Discord, browsers, terminals with claude code
+  #    running) graceful-stop too slowly for a gaming session switch. 5 s is
+  #    enough for shells (Helix, Emacs, fish) to react cleanly; what doesn't
+  #    react gets SIGKILL'd.
+  #
+  #    RISK: Marius's helix has no autosave (~/.config/helix/config.toml lacks
+  #    `editor.auto-save = true`). Unsaved buffers in helix at session-switch
+  #    time will be lost. Recommend enabling helix autosave as a follow-up.
+  #
+  #    Caelestia / wayland-wm@hyprland already have explicit short
+  #    TimeoutStopSec (5s / 10s); they're unaffected. The change pulls
+  #    udiskie / mpd / gammastep / hyprpaper / mako / syncthing / app-*.scope
+  #    from 90 s to 5 s. Syncthing flush-on-SIGTERM completes within 5 s in
+  #    typical state; it's crash-tolerant otherwise.
+  systemd.user.extraConfig = ''
+    DefaultTimeoutStopSec=5s
+    DefaultTimeoutAbortSec=3s
+  '';
+
+  # 3. Outer cap on the user manager itself — if the user@1000.service
+  #    aggregate stop doesn't complete in 10 s, SIGKILL the whole thing.
+  #    Defense-in-depth in case a stuck child service holds up the
+  #    transaction past the per-unit timeout.
+  systemd.services."user@".serviceConfig.TimeoutStopSec = "10s";
 
   networking = {
     hostName = "nixos-diego";
@@ -119,99 +162,134 @@
   services.displayManager.defaultSession =
     lib.mkIf config.jovian.steam.enable (lib.mkForce "hyprland-uwsm");
 
-  # ── Cold-boot autologin: REMOVED in Plan-0001 v7 Phase 1 ─────────────
+  # ── Cold-boot autologin: NOT configured ─────────────────────────────
   #
   # User explicitly chose greeter on every cold boot ("Remove autologin"
-  # answer 2026-05-17 ~01:25). The no-re-auth-during-session-switch
-  # guarantee (G3) is now preserved via the transient zzv mechanism
-  # below (Option γ): a systemd.path watches steamos-manager's zzt file
-  # and writes a matching zzv (User=marius) only while a session switch
-  # is in progress. Both zzt and zzv are wiped at next boot by the
-  # cleanup service further down.
+  # answer 2026-05-17 ~01:25). Plan-0001 v7 originally tried to also
+  # bypass the greeter during session switches via a transient
+  # [Autologin] in conf.d (the zzv mechanism, commits ee2a57f and
+  # follow-ups). That never worked: SDDM 0.21's daemon loads conf.d
+  # once at boot and never re-reads it, so a runtime-written [Autologin]
+  # is invisible to the autologin gate. The zzv code was removed
+  # 2026-05-17 ~18:55 and replaced by the greeter-preselect mechanism
+  # below, which writes /var/lib/sddm/state.conf so the greeter
+  # (re-spawned per display transition) preselects the correct
+  # destination session — user still types password once per switch,
+  # but doesn't have to touch the session dropdown.
   #
-  # If you want the v3 behavior back (autologin everywhere), set
-  # `diego.sessionSwitch.autoLogin = "always"` — then the
-  # diego-write-zzv-always service writes zzv at boot unconditionally.
-  # If you want NO autologin even for session switches (re-auth at
-  # every cycle), set it to "off" — neither path runs.
-  #
-  # See Plan-0001 v7 §5.1 for the full reasoning and trade-off table.
+  # If you ever want true autologin (no password during switches OR at
+  # cold boot, matching Jovian's autoStart=true setup), set:
+  #     services.displayManager.autoLogin.enable = true;
+  #     services.displayManager.autoLogin.user = username;
+  #     services.displayManager.sddm.autoLogin.relogin = true;
+  # That writes [Autologin] User=… permanently into NixOS-managed
+  # conf.d, present at SDDM startup so the daemon's autologin gate
+  # latches at boot. Boot would then go straight into the default
+  # session, bypassing the greeter entirely.
 
-  # ── Transient session-switch autologin: Option γ (path-unit driven) ──
-  # Fires when steamos-manager writes /etc/sddm.conf.d/zzt-steamos-temp-login.conf
-  # (i.e., during SUPER+G or "Switch to Desktop"). Writes a sibling
-  # zzv-diego-session-switch.conf with the User=marius half of the
-  # autologin pair. SDDM merges 00-nixos + zzv + zzt for the SDDM cycle
-  # → autologin fires → no password prompt during the switch.
-  # Both files wiped on next boot by the cleanup service below.
-  systemd.paths.diego-zzv-on-zzt = lib.mkIf
-    (config.jovian.steam.enable
-     && config.diego.sessionSwitch.autoLogin == "session-switch-only") {
-      description = "Watch for steamos-manager temp-login file to trigger zzv write";
+  # ── Session-switch greeter preselect ─────────────────────────────────
+  # When steamos-manager triggers a session switch (SUPER+G into Gamescope
+  # or "Switch to Desktop" out of Gamescope) it writes the destination
+  # session into /etc/sddm.conf.d/zzt-steamos-temp-login.conf, then stops
+  # graphical-session.target. SDDM transitions to a new display and spawns
+  # the greeter, which preselects whichever session is recorded in
+  # /var/lib/sddm/state.conf as `[Last] Session=`.
+  #
+  # By default state.conf was last written when the user logged INTO the
+  # session that just ended — exactly the wrong preselect for a switch.
+  # So when we observe steamos-manager's zzt CLOSE_WRITE, we immediately
+  # rewrite `[Last] Session=` to point at the destination. The greeter
+  # (a fresh Qt process per display transition) reads our corrected
+  # state.conf at process startup → preselects the right session → user
+  # types the password and lands in Gamescope (SUPER+G) or Hyprland
+  # (Switch to Desktop) without touching the session dropdown.
+  #
+  # Why this scheme is race-safe (per SDDM 0.21.0 source, agent 1 in
+  # roast-loop, file:line cited inline):
+  #   - state.conf is written ONLY at slotAuthenticationFinished(success=
+  #     true) — src/daemon/Display.cpp:484-496 — i.e., AFTER the user
+  #     types the password.
+  #   - The greeter reads state.conf at process startup — src/greeter/
+  #     SessionModel.cpp:167-173.
+  #   - Therefore between zzt-CLOSE_WRITE and greeter-Qt-startup, our
+  #     write window is wide open. Empirical latency 2026-05-17 19:55:
+  #     path-unit fires within 5 ms of zzt CLOSE_WRITE; script completes
+  #     in ~50 ms. Greeter Qt+theme spawn takes hundreds of ms minimum.
+  #     Margin ≥ 20×.
+  #
+  # Why state.conf rather than [Autologin] in conf.d? SDDM 0.21's daemon
+  # loads its conf.d ONCE at boot and never re-reads it (verified by
+  # strace 2026-05-17: zero openat() of sddm.conf.d after startup, even
+  # when conf.d files are modified). Writing [Autologin] User+Session
+  # into conf.d during a switch is invisible to the daemon's autologin
+  # gate, which is frozen from boot.
+  #
+  # NO `after = diego-sddm-wipe-stale-gamescope-login.service` directive
+  # — earlier v2 attempt created an ordering cycle through paths.target
+  # ↔ basic.target. PathChanged is IN_CLOSE_WRITE-only (empirically
+  # tested 2026-05-17 19:57: 1 fire on write, 0 fires on delete), so a
+  # stale zzt at boot can't trigger us spuriously. The defense was
+  # solving a non-problem.
+  systemd.paths.diego-greeter-preselect-on-zzt = lib.mkIf
+    config.jovian.steam.enable {
+      description = "Watch zzt CLOSE_WRITE → immediate state.conf rewrite for next greeter cycle";
       wantedBy = [ "multi-user.target" ];
-      pathConfig = {
-        PathExists = "/etc/sddm.conf.d/zzt-steamos-temp-login.conf";
-        PathChanged = "/etc/sddm.conf.d/zzt-steamos-temp-login.conf";
-      };
+      pathConfig.PathChanged = "/etc/sddm.conf.d/zzt-steamos-temp-login.conf";
     };
 
-  systemd.services.diego-zzv-on-zzt = lib.mkIf
-    (config.jovian.steam.enable
-     && config.diego.sessionSwitch.autoLogin == "session-switch-only") {
-      description = "Write zzv autologin marker (User=marius for SDDM cycle)";
+  systemd.services.diego-greeter-preselect-on-zzt = lib.mkIf
+    config.jovian.steam.enable {
+      description = "Immediately rewrite SDDM state.conf [Last] Session= to match zzt's Session=, so the next greeter preselects the destination session";
+      # steamos-manager observed to CLOSE_WRITE zzt up to 6× in <1s during
+      # a single switch (multi-syscall write). Disable rate-limit; script
+      # is idempotent so duplicate fires are harmless.
+      unitConfig.StartLimitIntervalSec = 0;
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = pkgs.writeShellScript "diego-write-zzv" ''
+        ExecStart = pkgs.writeShellScript "diego-greeter-preselect" ''
           set -euo pipefail
-          umask 0022
-          cat > /etc/sddm.conf.d/zzv-diego-session-switch.conf <<'EOF'
-          [Autologin]
-          User=marius
-          Session=hyprland-uwsm.desktop
-          EOF
+          zzt=/etc/sddm.conf.d/zzt-steamos-temp-login.conf
+          state=/var/lib/sddm/state.conf
+          # Bail conditions: no switch in progress, or state.conf doesn't
+          # exist yet (no prior login → nothing to preselect from).
+          [ -f "$zzt" ]   || exit 0
+          [ -f "$state" ] || exit 0
+          # Destination session basename (e.g. "gamescope-wayland.desktop"
+          # for SUPER+G, "hyprland-uwsm.desktop" for Switch to Desktop).
+          target=$(sed -n 's/^Session=//p' "$zzt" | head -1)
+          [ -n "$target" ] || exit 0
+          # Derive SessionDir prefix from current state.conf value. SDDM
+          # uses full /nix/store paths in [Last] Session=, e.g.
+          # /nix/store/<hash>-desktops/share/wayland-sessions/<sess>.desktop;
+          # we must match the same format so SessionModel's string
+          # comparison hits (greeter/SessionModel.cpp:169).
+          current=$(sed -n 's/^Session=//p' "$state" | head -1)
+          [ -n "$current" ] || exit 0
+          sess_dir=$(dirname "$current")
+          sess_path="$sess_dir/$target"
+          # Sanity: destination .desktop file must exist; if not, leave
+          # state.conf alone (the greeter will fall back to whatever was
+          # last selected).
+          [ -f "$sess_path" ] || exit 0
+          # Idempotent: already correct → no-op.
+          [ "$current" = "$sess_path" ] && exit 0
+          # Atomic rewrite. state.conf currently has only [Last]; a global
+          # ^Session= match is therefore safe.
+          sed -i "s|^Session=.*|Session=$sess_path|" "$state"
         '';
       };
     };
 
-  # ── Always-on autologin: Option α variant ─────────────────────────────
-  # Writes zzv at boot unconditionally — gives v3-style behavior (no
-  # greeter on subsequent cold boots) if the user explicitly opts in.
-  # NOT the default. User must set diego.sessionSwitch.autoLogin = "always".
-  systemd.services.diego-write-zzv-always = lib.mkIf
-    (config.jovian.steam.enable
-     && config.diego.sessionSwitch.autoLogin == "always") {
-      description = "Always-on autologin marker (Plan v7 Option α)";
-      before = [ "display-manager.service" ];
-      wantedBy = [ "multi-user.target" ];
-      after = [
-        "local-fs.target"
-        "diego-sddm-wipe-stale-gamescope-login.service"
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = pkgs.writeShellScript "diego-write-zzv-always" ''
-          set -euo pipefail
-          umask 0022
-          cat > /etc/sddm.conf.d/zzv-diego-session-switch.conf <<'EOF'
-          [Autologin]
-          User=marius
-          Session=hyprland-uwsm.desktop
-          EOF
-        '';
-      };
-    };
-
-  # ── Boot-time cleanup of session-switch markers ──────────────────────
-  # Wipes BOTH steamos-manager's zzt AND our zzv at every boot, before
-  # SDDM reads its conf.d. Defends against three failure modes:
-  #   (a) steamos-manager crash mid-switch leaving zzt behind → would
-  #       autologin into gamescope on every subsequent boot ("stuck in
-  #       Gamescope" trap — ADR-0017)
-  #   (b) zzv from a session-switch persisting across reboot → would
-  #       silently re-enable autologin (= Option α behavior) without
-  #       the user choosing it
-  #   (c) any partial-write or corrupted zzt/zzv from hard-power-off
+  # ── Boot-time cleanup of stale steamos-manager temp-login ────────────
+  # Wipes /etc/sddm.conf.d/zzt-steamos-temp-login.conf at every boot,
+  # before SDDM reads its conf.d. Defends against the failure mode where
+  # steamos-manager crashed mid-switch leaving zzt behind — would cause
+  # SDDM to autologin into Gamescope on every subsequent boot ("stuck in
+  # Gamescope" trap — ADR-0017).
+  #
+  # v3: zzv-diego-session-switch.conf removed from the wipe list — the
+  # Plan-0001 v7 conf.d-autologin mechanism was abandoned in favor of
+  # state.conf preselect (above). No nixos-diego boot writes zzv anymore.
   # Ordered before display-manager.service via `before` + after `local-fs`.
   systemd.services.diego-sddm-wipe-stale-gamescope-login =
     lib.mkIf config.jovian.steam.enable {
@@ -222,8 +300,9 @@
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        # v7: also wipes zzv-diego-session-switch.conf
-        ExecStart = "${pkgs.coreutils}/bin/rm -f /etc/sddm.conf.d/zzt-steamos-temp-login.conf /etc/sddm.conf.d/zzv-diego-session-switch.conf";
+        # v3 (Plan-0002): zzv path dropped; we no longer write zzv since the
+        # conf.d-autologin scheme was abandoned for state.conf preselect.
+        ExecStart = "${pkgs.coreutils}/bin/rm -f /etc/sddm.conf.d/zzt-steamos-temp-login.conf";
       };
     };
 
@@ -250,10 +329,9 @@
   # unlock on the lock screen.
   #
   # Services stripped:
-  #   - sddm: greeter — eliminates the perceived-mandatory prompt at boot
-  #     (with autoLogin below the greeter is bypassed entirely on the happy
-  #     path, but if autologin ever fails or the user lands on the greeter
-  #     manually, the prompt is password-only).
+  #   - sddm: greeter — eliminates the perceived-mandatory prompt at the
+  #     cold-boot greeter and at the per-switch greeter that we now also
+  #     show (no autologin in our setup; see comment block above).
   #   - login: TTY — same reason; SDDM substacks `login` so this also affects
   #     the substacked auth path.
   #   - polkit-1: CVE-2024-37408 — `auth sufficient pam_fprintd.so` on
