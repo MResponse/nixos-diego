@@ -7,6 +7,12 @@
   ...
 }:
 
+let
+  # Qylock SDDM theme bundle (Plan-0004 Phase 1, ADR-0026).
+  # Wrapper theme `qylock-random` rolls a sub-theme on every greeter spawn.
+  qylockThemes = pkgs.callPackage ./qylock-themes.nix { };
+in
+
 {
   imports = [
     ../../modules/desktop.nix
@@ -141,11 +147,13 @@
     # Packages below — Marius's user-installed Bibata in ~/.local/share/icons/
     # isn't visible to the sddm user.
     #
-    # All three SDDM-bundled themes (elarun, maldives, maya) are QtVersion=5
-    # per metadata.desktop and silently fall back on Qt6 SDDM. Cursor still
-    # works on the fallback because Greeter.cpp reads these keys regardless
-    # of which theme is "active". A Qt6-aware theme swap (pkgs.where-is-my-
-    # sddm-theme etc.) is a separate aesthetic concern for a future plan.
+    # Plan-0004 v6 supersedes the v5 "Qt6 theme swap is a future plan" note:
+    # `theme = "qylock-random"` activates the qylockThemes bundle's wrapper
+    # theme, which rolls a random sub-theme via QML Loader on every greeter
+    # spawn. Cursor + theme are independent ([Theme] keys; Current= +
+    # CursorTheme=/CursorSize= coexist).
+    theme = "qylock-random";
+    extraPackages = [ qylockThemes ];
     settings.Theme = {
       CursorTheme = "Bibata-Modern-Ice";
       CursorSize  = 24;
@@ -158,6 +166,7 @@
   # and the greeter.
   environment.systemPackages = lib.mkIf config.jovian.steam.enable [
     pkgs.bibata-cursors
+    qylockThemes  # Plan-0004 Phase 1 — see qylock-themes.nix + ADR-0026
   ];
 
   # Plan-0003 F5: remove the stale, unmanaged /etc/sddm.conf.d/theme.conf
