@@ -27,11 +27,23 @@
 
       bar.status.showBattery = true;  # Diego ist Notebook (Strix Halo) — Battery anzeigen
 
-      # SNI tray icon substitutions (Marius — Discord-Electron-Workaround)
+      # SNI tray icon substitutions
+      #   - chrome_status_icon_1: Discord-Electron sendet keinen Icon-Namen
+      #     (Marius — Discord-Workaround), wir patchen das PNG aus dem Discord-
+      #     Bundle ein.
+      #   - udiskie: meldet `drive-removable-media-usb-panel` als IconName,
+      #     aber Papirus-Dark deklariert keine `panel/`-Directories (nur
+      #     Papirus light tut es) → Quickshell findet das Icon nicht und
+      #     zeigt den Magenta-Checker-Platzhalter. `drive-removable-media`
+      #     existiert in Papirus-Dark/{16,22,24,32,64,96,128}x*/devices/.
       bar.tray.iconSubs = [
         {
           id = "chrome_status_icon_1";
           image = "file://${pkgs.discord}/opt/Discord/discord.png";
+        }
+        {
+          id = "udiskie";
+          icon = "drive-removable-media";
         }
       ];
 
@@ -90,10 +102,24 @@
   # loggt jeder Speicherversuch "Failed to write … Read-only file system" und feuert
   # einen "Failed to save config"-Toast (sichtbar nach jedem caelestia-Restart).
   #
-  # Fix: nach HM's writeBoundary den Symlink durch eine reguläre, schreibbare Kopie
-  # mit identischem Inhalt ersetzen. Nix bleibt Source of Truth — jeder `switch`
-  # überschreibt die Datei mit dem aktuellen HM-Seed; Runtime-Tweaks via UI
-  # überleben bis zum nächsten Rebuild (deklarativer Vertrag).
+  # Fix in zwei Phasen:
+  #   1. Pre-`checkLinkTargets`: alte writable-Kopie + stale `.hm-backup` entfernen,
+  #      damit HM eine saubere Ausgangslage hat. Sonst kollidiert HM beim 2. switch
+  #      ("Existing file 'shell.json.hm-backup' would be clobbered…"), weil der
+  #      vorige switch eine writable-Kopie + ein Backup hinterlassen hat.
+  #   2. Post-`writeBoundary`: den frisch geschriebenen Nix-Store-Symlink durch eine
+  #      reguläre, schreibbare Kopie mit identischem Inhalt ersetzen.
+  # Nix bleibt Source of Truth — jeder `switch` überschreibt die Datei mit dem
+  # aktuellen HM-Seed; Runtime-Tweaks via UI überleben bis zum nächsten Rebuild
+  # (deklarativer Vertrag).
+  home.activation.cleanCaelestiaShellJson = lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
+    target="${config.xdg.configHome}/caelestia/shell.json"
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+      run rm -f "$target"
+    fi
+    run rm -f "$target.hm-backup"
+  '';
+
   home.activation.makeCaelestiaShellJsonWritable = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     target="${config.xdg.configHome}/caelestia/shell.json"
     if [ -L "$target" ]; then
