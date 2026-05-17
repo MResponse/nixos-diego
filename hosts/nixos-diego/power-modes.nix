@@ -143,7 +143,7 @@ let
   powerModeCli = pkgs.writeShellApplication {
     name = "power-mode";
     runtimeInputs = with pkgs; [
-      libnotify
+      glib # gdbus — see cmd_set for why notify-send isn't sufficient
       systemd
       coreutils
       power-profiles-daemon
@@ -214,10 +214,24 @@ let
         local pretty="''${mode^}"
         pretty="''${pretty//-/ }"
         # Mode-specific notification icon — absolute path into the bundled
-        # PowerModes theme. notify-send → freedesktop notification spec → the
-        # notifier (Caelestia/dunst/etc.) loads the file directly.
-        local icon="${modeIcons}/share/icons/PowerModes/scalable/status/$mode.svg"
-        notify-send -u low -i "$icon" "Power mode: $pretty" "Now active" || true
+        # PowerModes theme. Path ends in "-symbolic" (extensionless flat
+        # symlink) so Caelestia's Notification.qml activates its ColouredIcon
+        # recolour layer (`appIcon.endsWith("symbolic")` → overlay with
+        # m3onSecondaryContainer). Without that the raw SVG renders with
+        # currentColor=black against the dark notification surface.
+        #
+        # Why gdbus and not notify-send: libnotify's `-i` arg is forwarded as
+        # the "image-path" hint, NOT as the D-Bus app_icon positional arg.
+        # Caelestia's recolour check reads modelData.appIcon (the positional
+        # arg) only — so notify-send can never trigger it regardless of
+        # filename. gdbus lets us populate app_icon directly.
+        local icon="${modeIcons}/share/icons/PowerModes/$mode-symbolic"
+        gdbus call --session \
+          --dest org.freedesktop.Notifications \
+          --object-path /org/freedesktop/Notifications \
+          --method org.freedesktop.Notifications.Notify \
+          power-mode 0 "$icon" "Power mode: $pretty" "Now active" \
+          "[]" "{'urgency': <byte 0>}" 3000 >/dev/null || true
       }
 
       cmd_cycle() {
@@ -298,8 +312,17 @@ let
     exec ${pkgs.systemd}/bin/systemctl start "power-modes-apply@$mode.service"
   '';
 
-  # 5 SVG icons packaged as a freedesktop icon theme — one per mode. Symbolic
-  # style, `fill="currentColor"` so the bar's icon-recolour picks them up.
+  # 5 SVG icons packaged as a freedesktop icon theme — one per mode.
+  #
+  # Colour choice: fixed `#bebebe` (Papirus symbolic dark-theme tone), not
+  # `currentColor`. Two consumers, two needs:
+  #   - Caelestia bar tray paints raw SVG (Config.bar.tray.recolour=false by
+  #     default; flipping it would also recolour Papirus tray icons to
+  #     m3secondary). A baked grey matches the side-by-side Papirus icons.
+  #   - Caelestia notifications run a Colouriser shader (ImageAnalyser detects
+  #     dominantColour, replaces with m3onSecondaryContainer). A grey source
+  #     still gets recoloured to the M3 theme tone — the absolute colour
+  #     doesn't matter as long as the SVG is monochrome.
   #
   # Structure: both freedesktop-conformant (scalable/status/<mode>.svg with a
   # valid index.theme) AND a flat layer of extensionless symlinks at the
@@ -353,19 +376,19 @@ let
     Context=Status
     EOF
     cat > "$base/scalable/status/smart-sense.svg" <<'EOF'
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="#bebebe">
       <path d="M8 1 L9 6 L14 7 L9 8 L8 13 L7 8 L2 7 L7 6 Z"/>
       <circle cx="13" cy="3" r="1"/>
       <circle cx="3" cy="13" r="1"/>
     </svg>
     EOF
     cat > "$base/scalable/status/performance.svg" <<'EOF'
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="#bebebe">
       <path d="M8 1 L13 8 L10 8 L10 14 L6 14 L6 8 L3 8 Z"/>
     </svg>
     EOF
     cat > "$base/scalable/status/cool.svg" <<'EOF'
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke="#bebebe" stroke-width="1.5" stroke-linecap="round" fill="none">
       <line x1="8" y1="1" x2="8" y2="15"/>
       <line x1="1" y1="8" x2="15" y2="8"/>
       <line x1="3" y1="3" x2="13" y2="13"/>
@@ -375,12 +398,12 @@ let
     EOF
     cat > "$base/scalable/status/quiet.svg" <<'EOF'
     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-      <path fill="currentColor" d="M2 6 H5 L9 3 V13 L5 10 H2 Z"/>
-      <path stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" d="M11 6 L15 10 M15 6 L11 10"/>
+      <path fill="#bebebe" d="M2 6 H5 L9 3 V13 L5 10 H2 Z"/>
+      <path stroke="#bebebe" stroke-width="1.5" stroke-linecap="round" fill="none" d="M11 6 L15 10 M15 6 L11 10"/>
     </svg>
     EOF
     cat > "$base/scalable/status/power-saver.svg" <<'EOF'
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="#bebebe">
       <path d="M2 14 C 2 8, 8 2, 14 2 C 14 8, 8 14, 2 14 Z"/>
       <path stroke="#000" stroke-opacity="0.4" stroke-width="0.8" fill="none" d="M2 14 L 14 2"/>
     </svg>
@@ -388,9 +411,15 @@ let
 
     # Extensionless symlinks at the theme root — see header comment for why.
     # Relative target so the link stays valid under whatever /nix/store hash.
+    # Two variants per mode:
+    #   - "<mode>"           → consumed by the SNI tray (bar) via IconName
+    #   - "<mode>-symbolic"  → consumed by notify-send so Caelestia's
+    #                          Notification.qml endsWith("symbolic") check
+    #                          activates the ColouredIcon recolour layer.
     for src in "$base"/scalable/status/*.svg; do
       name=$(basename "$src" .svg)
       ln -s "scalable/status/$name.svg" "$base/$name"
+      ln -s "scalable/status/$name.svg" "$base/$name-symbolic"
     done
   '';
 
