@@ -36,6 +36,13 @@
     defaultMode = "smart-sense";
   };
 
+  # Boot-menu label: identifies generations built from this baseline as the
+  # known-good post-Plan-0002 stable point (session-switch UX + Gamescope
+  # power-mode integration verified end-to-end 2026-05-17). When picking a
+  # generation in systemd-boot, look for "stable-plan0002" in the entry name.
+  # Update this string when a new milestone ships (Plan-0003 etc.).
+  system.nixos.label = "stable-plan0002";
+
   # ── Session-switch speedups (Plan-0002 §2.3) ─────────────────────────
   #
   # 1. Disable coredump storage. Electron apps (Discord, Slack, browsers)
