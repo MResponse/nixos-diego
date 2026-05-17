@@ -3,7 +3,8 @@
 # keepmenu — wofi-Picker für KeePassXC-Einträge (Frage 4.18 — donvini's
 # wofi-pass war nicht mit KeePassXC kompatibel, deshalb dieser Ersatz).
 #
-# Keybind: Super+P → keepmenu (siehe hyprland.nix bind-Liste)
+# Keybind: Super+Shift+K → keepmenu (siehe hyprland.nix bind-Liste).
+# Verschoben von Super+P, weil Super+P jetzt `power-mode cycle` auf Diego ist.
 #
 # Master-Passwort beim ersten Aufruf, danach 6h Cache (pw_cache_period_min = 360).
 #

@@ -89,38 +89,142 @@
   environment.etc."sddm.conf.d/steamos.conf" =
     lib.mkIf config.jovian.steam.enable { text = ""; };
 
+  # Hyprland MUSS via UWSM laufen, sonst ist `steamosctl switch-to-game-mode`
+  # nur halb wirksam: session.rs:logout() stoppt `graphical-session.target`,
+  # damit SDDM die per zzt-steamos-temp-login.conf gesetzte Gamescope-Session
+  # einloggt. Ohne UWSM ist Hyprland aber kein systemd-Unit (SDDM startet
+  # `start-hyprland` direkt als Session-Exec), die Target-Hierarchie reisst
+  # alle WantedBy-User-Services (caelestia, portals, indicator, signal, …)
+  # ab — Hyprland selbst überlebt jedoch. SDDM sieht kein Session-Ende, der
+  # Autologin-Handoff feuert nie, und der User sitzt in einem Compositor mit
+  # totem Bar/Notification/Focus-Stack fest (Workspace-2 = 0 Fenster, Input
+  # geht nirgendwohin).
+  #
+  # Wichtig: `programs.hyprland.enable = true` installiert NUR die
+  # `hyprland-uwsm.desktop`-Session-Datei in wayland-sessions/, NICHT das
+  # `uwsm`-Binary selbst. Eine frühere Iteration dieses Blocks setzte nur
+  # `defaultSession = "hyprland-uwsm"` und kassierte beim Autologin ein
+  # `exit 127` (uwsm not in PATH) → SDDM fiel auf den Greeter zurück, dort
+  # war Gamescope aus `state.conf [Last]` preselected. `withUWSM = true`
+  # darunter zieht das Binary + systemd-Target-Setup mit (siehe nixpkgs
+  # `programs.hyprland.withUWSM`) und ist die Voraussetzung dafür, dass
+  # `defaultSession = "hyprland-uwsm"` überhaupt funktioniert.
+  #
+  # `mkForce` ist nötig, weil Donvini's modules/hyprland/default.nix:10
+  # upstream explizit `defaultSession = "hyprland"` setzt. Die Kopplung an
+  # Jovian macht den Override automatisch reversibel: ohne Jovian läuft
+  # Diego wieder mit Donvini's Plain-Hyprland-Default. Details: ADR-0017.
+  programs.hyprland.withUWSM = lib.mkIf config.jovian.steam.enable true;
+  services.displayManager.defaultSession =
+    lib.mkIf config.jovian.steam.enable (lib.mkForce "hyprland-uwsm");
+
+  # Auto-login marius into the default desktop session (hyprland-uwsm).
+  # Without autoLogin, SDDM presents the Maldives greeter and preselects
+  # whichever session was last logged into (state.conf [Last] Session), and
+  # one accidental Gamescope login stickies that selection — the greeter's
+  # session dropdown is the only escape and on this resolution it has been
+  # unreliable to operate. Autologin sidesteps the greeter on the happy path:
+  # boot → directly into Hyprland. The Jovian session-switching flow remains
+  # intact:
+  #   - SUPER+G → steamosctl switch-to-game-mode writes
+  #     /etc/sddm.conf.d/zzt-steamos-temp-login.conf with
+  #     [Autologin] User=marius Session=gamescope-wayland.desktop.
+  #     That file is alphabetically later than 00-nixos.conf, so its
+  #     [Autologin] Session= wins for the transition → Gamescope.
+  #   - "Switch to Desktop" in Steam → steamos-manager removes the temp file
+  #     → next SDDM cycle reads only our 00-nixos.conf → autologin back into
+  #     hyprland-uwsm.
+  # Coupled to `jovian.steam.enable` like the SDDM/defaultSession switches
+  # above: without Jovian, Diego falls back to Donvini's GDM-into-Hyprland
+  # default with no autologin.
+  services.displayManager.autoLogin = lib.mkIf config.jovian.steam.enable {
+    enable = true;
+    user = "marius";
+  };
+
+  # Defensive boot-time cleanup. If a previous switch-to-game-mode left
+  # /etc/sddm.conf.d/zzt-steamos-temp-login.conf behind (steamos-manager
+  # crash, hard-power-off mid-transition, daemon order issue at shutdown),
+  # SDDM would keep autologging the user into Gamescope on every subsequent
+  # boot — exactly the trap Marius hit before this fix landed. Wipe the
+  # override at boot only (multi-user.target wantedBy + RemainAfterExit), so
+  # an SDDM restart triggered by a *new* in-session switch-to-game-mode does
+  # NOT also wipe the freshly-written file. Ordered before display-manager
+  # so SDDM sees the cleaned state when it starts.
+  systemd.services.diego-sddm-wipe-stale-gamescope-login =
+    lib.mkIf config.jovian.steam.enable {
+      description = "Wipe stale steamos-manager temp-login override at boot";
+      before = [ "display-manager.service" ];
+      wantedBy = [ "multi-user.target" ];
+      after = [ "local-fs.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${pkgs.coreutils}/bin/rm -f /etc/sddm.conf.d/zzt-steamos-temp-login.conf";
+      };
+    };
+
   # Fingerprint biometric authentication. ZBook Ultra G1a ships with a
   # Synaptics 06cb:0106 reader, supported natively by libfprint's "Synaptics
-  # Sensors" driver (no proprietary libfprint-2-tod needed). fprintAuth on
-  # each PAM service prepends `auth sufficient pam_fprintd.so`, so fingerprint
-  # is tried first and password remains a fallback. Caelestia's lock screen
-  # auto-detects enrolled fingerprints via its built-in Pam.qml fprint context
-  # (default enableFprint = true), so no per-shell config is needed.
+  # Sensors" driver (no proprietary libfprint-2-tod needed).
   #
-  # `login` (TTY) is intentionally NOT in this set — Marius uses SDDM as the
-  # primary login surface; leaving TTY without fprintAuth ensures a stolen
-  # finger can't reach an authenticated shell via VT-switch when SDDM is
-  # locked. Password remains the fallback at TTY.
+  # Earlier approach: keep pam_fprintd in /etc/pam.d/{sddm,login,sudo} but
+  # move it AFTER pam_unix (sufficient short-circuit on password success).
+  # On paper this lets the user type password → pam_unix succeeds → stack
+  # returns without ever firing pam_fprintd. In practice on Diego's SDDM
+  # greeter the UX still felt mandatory — the sensor LED arms whenever
+  # fprintd is in the auth chain, and the Maldives theme doesn't communicate
+  # "may scan OR type password" vs. "must scan AND type password", so Marius
+  # consistently placed his finger anyway and read that as required.
   #
-  # `polkit-1` is intentionally NOT in this set — CVE-2024-37408 documents
-  # that `auth sufficient pam_fprintd.so` on polkit-1 lets a background
-  # process hijack the next fingerprint touch to authorize a privileged
-  # action without Marius realizing what he's authorizing (CVSS 7.3 HIGH,
-  # vendor disputed but the mechanism is real). The polkit GUI dialog IS
-  # the only remaining attention-point that confirms "yes, this specific
-  # action is what I want". Password-on-polkit is rare enough (a few times
-  # a week max) that the UX cost is negligible vs. the security gain.
-  # sudo keeps fprintAuth because TTY sudo prints "Place finger on sensor"
-  # — Marius sees what he's about to authorize. Different attention model.
+  # New approach: strip pam_fprintd from the user-facing /etc/pam.d/*
+  # entirely — make password unambiguously sufficient at every PAM prompt.
+  # fprintd daemon stays enabled because Caelestia's lock screen consumes
+  # fprintd via its OWN bundled PAM stack (caelestia-shell/assets/pam.d/passwd,
+  # which contains only pam_unix.so) plus a separate Quickshell `fprint`
+  # PamContext that talks to fprintd over DBus — neither path goes through
+  # /etc/pam.d/, so stripping fprintd here does not break the optional-touch
+  # unlock on the lock screen.
   #
-  # Master password for KeePassXC stays — Linux has no Touch-ID-equivalent
-  # path for KeePassXC's first unlock; the autostart in hm-modules/hyprland.nix
-  # plus Quick Unlock keeps it to one master-password entry per boot.
+  # Services stripped:
+  #   - sddm: greeter — eliminates the perceived-mandatory prompt at boot
+  #     (with autoLogin below the greeter is bypassed entirely on the happy
+  #     path, but if autologin ever fails or the user lands on the greeter
+  #     manually, the prompt is password-only).
+  #   - login: TTY — same reason; SDDM substacks `login` so this also affects
+  #     the substacked auth path.
+  #   - polkit-1: CVE-2024-37408 — `auth sufficient pam_fprintd.so` on
+  #     polkit-1 lets a background process hijack the next finger touch to
+  #     authorize an arbitrary privileged action (CVSS 7.3, vendor-disputed
+  #     but real). The polkit GUI dialog is the only attention anchor for
+  #     "what am I authorizing"; password-only there is a security gain on
+  #     top of the UX win.
+  #
+  # sudo KEEPS fprintAuth: TTY sudo prints "Place finger on sensor" next to
+  # the command about to run, so Marius sees exactly what's being authorized
+  # (no hijack window). The pam_unix-before-pam_fprintd reorder below makes
+  # password-first the default — fingerprint only fires on an empty/wrong
+  # password.
+  #
+  # Note: services like su / passwd / chsh / cups / swaylock still have
+  # pam_fprintd by NixOS default (fprintAuth = services.fprintd.enable = true).
+  # They're left untouched because they're rarely hit interactively and the
+  # cleanup-burden isn't worth the noise. If any of them become friction-
+  # points later, add a per-service `fprintAuth = lib.mkForce false;` line.
   services.fprintd.enable = true;
   security.pam.services = {
-    sddm.fprintAuth = true;
+    sddm.fprintAuth = lib.mkForce false;
+    login.fprintAuth = lib.mkForce false;
+    "polkit-1".fprintAuth = lib.mkForce false;
     sudo.fprintAuth = true;
   };
+
+  # Move pam_fprintd AFTER pam_unix on sudo (the only retained surface).
+  # Relative offset per NixOS pam.nix docs — absolute order values are
+  # subject to nixpkgs renumbering. sddm/login overrides removed: they were
+  # reordering a rule that no longer exists in the rendered stack.
+  security.pam.services.sudo.rules.auth.fprintd.order =
+    config.security.pam.services.sudo.rules.auth.unix.order + 10;
 
   # Skip the polkit-agent password prompt for fingerprint enrollment.
   # Default polkit policy requires `auth_self` (user must enter password in

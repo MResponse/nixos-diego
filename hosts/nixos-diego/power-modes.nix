@@ -301,23 +301,41 @@ let
   # 5 SVG icons packaged as a freedesktop icon theme — one per mode. Symbolic
   # style, `fill="currentColor"` so the bar's icon-recolour picks them up.
   #
-  # Why a real theme structure (with index.theme and scalable/status/) and not
-  # just a flat dir: SNI publishers can advertise either `IconName` (a
-  # theme-relative name) or raw `IconPixmap` data. AppIndicator's
-  # `set_icon_full(name)` sets IconName — Caelestia's tray (Quickshell's
-  # SystemTray) treats IconName as a theme name and resolves it via the
-  # icon-theme search path declared in `IconThemePath`. Sending an absolute
-  # SVG path as IconName works for some SNI hosts but Quickshell rejects it
-  # silently — the indicator registers but no icon ever paints.
-  #
-  # Pairing this theme with `set_icon_theme_path()` in the Python indicator
-  # makes IconThemePath point here, and `set_icon_full("smart-sense", …)`
-  # then resolves to `scalable/status/smart-sense.svg` via standard XDG
-  # icon-theme lookup.
+  # Structure: both freedesktop-conformant (scalable/status/<mode>.svg with a
+  # valid index.theme) AND a flat layer of extensionless symlinks at the
+  # theme root. The flat layer is a workaround for two co-located bugs in
+  # the rendering stack — see "Why the flat extensionless symlinks" below.
   #
   # Distinct shapes so smart-sense (balanced ppd) and cool (also balanced) are
   # visually distinguishable at a glance — that's the whole point of the bar
   # indicator, otherwise hovering the battery popout would suffice.
+  #
+  # ── Why the flat extensionless symlinks (ADR-0016 §"Offener Punkt") ──
+  #
+  # The SNI tray-slot is rendered by Caelestia -> Quickshell -> QtQuick.Image.
+  # The Python indicator publishes `IconName="quiet"` and `IconThemePath=<this
+  # theme>`. The freedesktop spec says hosts resolve that via XDG icon-theme
+  # lookup (read index.theme, search `scalable/status/quiet.svg`, etc.).
+  #
+  # Neither layer does that. Both naively join `${path}/${name}`:
+  #   - Caelestia utils/Icons.qml getTrayIcon():
+  #       icon = Qt.resolvedUrl(`${path}/${name.slice(name.lastIndexOf("/")+1)}`)
+  #       -> builds `/.../PowerModes/quiet`
+  #   - Quickshell src/core/iconimageprovider.cpp requestPixmap():
+  #       path = QString("/%1/%2").arg(path, iconName.sliced(...))
+  #       -> falls back to `QPixmap("/.../PowerModes/quiet")` if QIcon::fromTheme misses
+  #
+  # No `.svg` appended, no `scalable/status/` walked. Both look for a literal
+  # file at `${IconThemePath}/${IconName}`. With only the conformant tree the
+  # file isn't there -> Quickshell paints its `missingPixmap` (the magenta /
+  # black checker pattern).
+  #
+  # Fix: put a symlink at exactly the path the naive join produces. Pointing
+  # the symlink at the canonical `scalable/status/<mode>.svg` means QFile
+  # opens the SVG transparently; QImageReader (auto-detect on by default)
+  # then content-sniffs `<?xml…<svg…>` via the QtSvg plugin and renders.
+  # Spec-conformant consumers (future Caelestia fix, other SNI hosts) keep
+  # finding the icon under `scalable/status/`.
   modeIcons = pkgs.runCommand "power-mode-icons" { } ''
     base=$out/share/icons/PowerModes
     mkdir -p "$base/scalable/status"
@@ -367,6 +385,13 @@ let
       <path stroke="#000" stroke-opacity="0.4" stroke-width="0.8" fill="none" d="M2 14 L 14 2"/>
     </svg>
     EOF
+
+    # Extensionless symlinks at the theme root — see header comment for why.
+    # Relative target so the link stays valid under whatever /nix/store hash.
+    for src in "$base"/scalable/status/*.svg; do
+      name=$(basename "$src" .svg)
+      ln -s "scalable/status/$name.svg" "$base/$name"
+    done
   '';
 
   # Absolute path to the theme dir — passed via env var; the indicator hands

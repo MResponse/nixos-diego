@@ -64,12 +64,20 @@
   # Binary bleibt im PATH (würde ohne Steam-Deck-Hardware eh nichts machen).
   security.wrappers.galileo-mura-extractor.setuid = lib.mkForce false;
 
-  # Audit-Subsystem und AMD-IOMMU explizit zurück auf NixOS-Defaults
-  # (Jovian würde mit useSteamOSConfig=true beide deaktivieren).
-  # iommu=pt = passthrough-mode, schützt vor DMA-Attacks via USB4/Thunderbolt
-  # ohne signifikanten Performance-Cost.
+  # AMD-IOMMU explizit auf NixOS-Default (Jovian würde mit useSteamOSConfig=true
+  # deaktivieren). iommu=pt = passthrough-mode, schützt vor DMA-Attacks via
+  # USB4/Thunderbolt ohne signifikanten Performance-Cost.
+  #
+  # `audit=1` wurde ENTFERNT: NixOS aktiviert keinen auditd-Userspace-Daemon
+  # mit (`security.auditd.enable` default false). Mit `audit=1` füllt der
+  # Kernel kauditd's 64-Slot-Hold-Queue innerhalb von Sekunden, ohne dass
+  # irgendwer drain't — Resultat ist die Flut von `audit: kauditd hold queue
+  # overflow` in dmesg/journalctl -k (+ stiller `audit_lost`-Increment).
+  # Falls Audit-Logging je gebraucht wird: `security.auditd.enable = true;`
+  # UND `audit=1` zurück hinzufügen — die beiden gehören paarweise oder gar
+  # nicht. Reines `audit=0` wäre überflüssig; ohne Kernel-Param landet das
+  # Subsystem im "compiled-in but inactive"-Zustand, der nichts emittiert.
   boot.kernelParams = [
-    "audit=1"
     "amd_iommu=on"
     "iommu=pt"
   ];
@@ -80,9 +88,12 @@
   # state file `~/.local/state/steamos-manager/state.toml` doesn't exist
   # yet. Jovian's autostart.nix:106 provisions an identical oneshot but
   # only under `mkIf cfg.autoStart`. We're on autoStart=false so we
-  # replicate it ourselves, un-gated, value derived from
-  # services.displayManager.defaultSession so a future swap to
-  # hyprland-uwsm pulls through automatically.
+  # replicate it ourselves, un-gated. Value is derived from
+  # services.displayManager.defaultSession, which Diego pins to
+  # "hyprland-uwsm" in default.nix (ADR-0017) so the Gamescope→Hyprland
+  # return path lands in the UWSM-managed session that switch-to-game-mode
+  # also depends on. Touching defaultSession upstream now propagates here
+  # automatically without code change.
   systemd.user.services.set-steamos-desktop-session = {
     description = "Pin steamos-manager default desktop session";
     wants = [ "steamos-manager.service" ];

@@ -23,11 +23,23 @@ let
   # User then presses Ctrl+V normally in Warp/Claude Code to paste the path.
   #
   # Why not type the path directly with wtype? wtype emits raw keysyms via
-  # the virtual-keyboard-v1 protocol. The Compositor still sees the physical
+  # the virtual-keyboard-v1 protocol. The compositor still sees the physical
   # Alt as held during typing, so each character gets re-interpreted as an
   # Alt+<key> shortcut (Warp/Hyprland/Claude eat or remap it). Documented
   # workaround in the Hyprland community: don't type, hand off via clipboard.
   # https://bbs.archlinux.org/viewtopic.php?id=303538
+  #
+  # Why text-only and not multi-MIME (text/plain + x-special/gnome-copied-files
+  # so Thunar can paste the file)? Tried that via `cb` (clipboard-jh) — it works
+  # for a single invocation, but each `cb copy` spawns a persistent Wayland
+  # clipboard-source daemon, and successive invocations fight each other for
+  # selection ownership (~2s re-claim cycle). The compositor opens/closes the
+  # source surface on each re-claim, which steals focus and triggers kitty's
+  # resize banner on every other window — the system becomes unusable. wl-copy
+  # daemonises cleanly but only supports a single --type per invocation, so
+  # genuine multi-MIME isn't reachable with stock wl-clipboard. Trade-off: keep
+  # text-only; if file-paste-in-Thunar is needed, drag-and-drop from the
+  # notification or use the screenshot cache directly.
   cc-paste-image = pkgs.writeShellApplication {
     name = "cc-paste-image";
     runtimeInputs = with pkgs; [
@@ -323,7 +335,10 @@ in
         "$mod, M, exec, app2unit -- thunderbird"                                             # 4.16 — Thunderbird
         "$mod, A, exec, steam-run anki"                                                      # 4.2 — Anki
         "$mod, N, exec, kitty -e yazi"                                                       # 4.3 — Yazi TUI Filemanager
-        "$mod, G, exec, mangohud steam"                                                      # 4.4 — Steam with MangoHud
+        # 4.4 — Steam with MangoHud — see Gaming-Mode block below: on
+        # jovian-equipped hosts this lives on $mod SHIFT, G (and $mod, G
+        # becomes the Gaming-Mode session switch); on non-jovian hosts it
+        # keeps donvini's original $mod, G slot.
         "$mod, O, exec, emacsclient -a '' -e '(org-agenda nil \"a\")'"                       # 4.5 — Org-Agenda
         "$mod, Z, exec, app2unit -- zotero"                                                  # 4.12 — Zotero
 
@@ -338,7 +353,9 @@ in
         "CTRL ALT, T, exec, darkman toggle"                                                  # darkman dark/light
 
         # Password Manager (Frage 4.18 — Custom für KeePassXC statt donvini's wofi-pass)
-        "$mod, P, exec, keepmenu"
+        # Moved from $mod+P → $mod+SHIFT+K so $mod+P is free for `power-mode cycle`
+        # (K mnemonic = KeePass).
+        "$mod SHIFT, K, exec, keepmenu"
 
         # Color Picker (Marius — moved aus Super+Shift+C wo's mit Codium kollidierte)
         "$mod ALT, C, exec, hyprpicker -a"
@@ -365,27 +382,38 @@ in
         "$mod ALT, F12, exec, notify-send -u low -i dialog-information-symbolic 'Test notification' \"Here's a really long message to test truncation and wrapping\\nYou can middle click or flick this notification to dismiss it!\" -a 'Shell' -A 'Test1=I got it!' -A 'Test2=Another action'"
       ]
       # ── Power modes ────────────────────────────────────────────
-      # Five HP-equivalent modes (Smart Sense / Performance / Cool / Quiet /
-      # Power Saver). Only wired in when services.powerModes is enabled at
-      # the system level — keeps this hm-module portable to hosts that don't
-      # ship the engine. See hosts/nixos-diego/power-modes.nix.
+      # Five HP-equivalent modes (Power Saver / Quiet / Cool / Smart Sense /
+      # Performance). F1..F5 ordered ascending by system performance — F1 is
+      # the weakest, F5 the strongest. $mod+P cycles to the next stronger mode
+      # (wraps at the top). Only wired in when services.powerModes is enabled
+      # at the system level — keeps this hm-module portable to hosts that
+      # don't ship the engine. See hosts/nixos-diego/power-modes.nix.
       ++ lib.optionals (osConfig.services.powerModes.enable or false) [
-        "$mod SHIFT, F1, exec, power-mode set smart-sense"
-        "$mod SHIFT, F2, exec, power-mode set performance"
+        "$mod SHIFT, F1, exec, power-mode set power-saver"
+        "$mod SHIFT, F2, exec, power-mode set quiet"
         "$mod SHIFT, F3, exec, power-mode set cool"
-        "$mod SHIFT, F4, exec, power-mode set quiet"
-        "$mod SHIFT, F5, exec, power-mode set power-saver"
+        "$mod SHIFT, F4, exec, power-mode set smart-sense"
+        "$mod SHIFT, F5, exec, power-mode set performance"
+        "$mod, P, exec, power-mode cycle"
       ]
       # ── Gaming Mode ────────────────────────────────────────────
-      # SUPER+SHIFT+G — switch to SteamOS Gaming Mode (gamescope session +
-      # Steam Deck UI). Parallels $mod+G (launch Steam in desktop) — SHIFT
-      # escalates to the full session switch. Bridges Big Picture muscle
-      # memory onto the two-session model: ADR-0005 picked autoStart=false
-      # so Hyprland stays the default boot, and steamosctl is the bridge.
-      # Return path: Steam Power Menu → "Switch to Desktop"
-      # (driven by jovian.steam.desktopSession).
+      # SteamOS muscle memory: one-key access to Gaming Mode. SUPER+G
+      # switches into the gamescope session (Steam Deck UI) via
+      # steamosctl — ADR-0005 picked jovian.steam.autoStart=false so
+      # Hyprland stays the default boot, and steamosctl is the bridge
+      # without re-login. Return path is the Steam Power Menu →
+      # "Switch to Desktop" (wired up by ADR-0011's oneshot).
+      #
+      # SUPER+SHIFT+G keeps donvini's "Frage 4.4" Steam-in-desktop
+      # launcher reachable on jovian hosts — SHIFT escalates from
+      # "go gaming" to "no, I want Steam *here* in Hyprland". Non-jovian
+      # hosts keep donvini's original $mod, G binding (block below).
       ++ lib.optionals (osConfig.jovian.steam.enable or false) [
-        "$mod SHIFT, G, exec, steamosctl switch-to-game-mode"
+        "$mod, G, exec, steamosctl switch-to-game-mode"                                      # SteamOS Gaming Mode session
+        "$mod SHIFT, G, exec, mangohud steam"                                                # 4.4 — Steam in desktop (escalation)
+      ]
+      ++ lib.optionals (!(osConfig.jovian.steam.enable or false)) [
+        "$mod, G, exec, mangohud steam"                                                      # 4.4 — Steam with MangoHud (donvini default)
       ];
 
       # Repeat-fähige Bindings

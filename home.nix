@@ -25,6 +25,7 @@
     ./hm-modules/services.nix
     ./hm-modules/keepmenu.nix
     ./hm-modules/darkman.nix
+    ./hm-modules/gtk.nix
     inputs.caelestia-shell.homeManagerModules.default
   ];
 

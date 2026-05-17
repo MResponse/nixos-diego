@@ -84,6 +84,7 @@ Then create `hosts/newhost/` with `default.nix` (imports shared modules), `hardw
 - `caelestia.nix` — Desktop shell config + runtime dependencies
 - `services.nix` — User services (udiskie, syncthing, mpd, gammastep)
 - `packages.nix` — User-level packages (dev tools, writing, communication, Japanese)
+- `gtk.nix` — GTK module enable + Papirus icon theme (required so udiskie/Thunar/etc. find icons)
 - `helix.nix`, `kitty.nix`, `mpv.nix`, `starship.nix`, `yazi.nix`, `zathura.nix`, `zellij.nix`, `doom.nix` — Per-tool configs
 
 ### Desktop Shell
