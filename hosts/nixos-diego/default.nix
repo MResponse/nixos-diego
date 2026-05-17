@@ -18,6 +18,7 @@
     # zwei Composition-Patterns in einer Codebase — aber sauberer als die
     # zentrale mkDesktopHost-Liste für einen Single-Host-Eintrag aufzubohren.
     inputs.jovian-nixos.nixosModules.default
+    ./diego-options.nix    # Diego-local Nix options (Plan-0001 v7 §5)
     ./gaming.nix
     ./hardware.nix
     ./services.nix
@@ -118,49 +119,111 @@
   services.displayManager.defaultSession =
     lib.mkIf config.jovian.steam.enable (lib.mkForce "hyprland-uwsm");
 
-  # Auto-login marius into the default desktop session (hyprland-uwsm).
-  # Without autoLogin, SDDM presents the Maldives greeter and preselects
-  # whichever session was last logged into (state.conf [Last] Session), and
-  # one accidental Gamescope login stickies that selection — the greeter's
-  # session dropdown is the only escape and on this resolution it has been
-  # unreliable to operate. Autologin sidesteps the greeter on the happy path:
-  # boot → directly into Hyprland. The Jovian session-switching flow remains
-  # intact:
-  #   - SUPER+G → steamosctl switch-to-game-mode writes
-  #     /etc/sddm.conf.d/zzt-steamos-temp-login.conf with
-  #     [Autologin] User=marius Session=gamescope-wayland.desktop.
-  #     That file is alphabetically later than 00-nixos.conf, so its
-  #     [Autologin] Session= wins for the transition → Gamescope.
-  #   - "Switch to Desktop" in Steam → steamos-manager removes the temp file
-  #     → next SDDM cycle reads only our 00-nixos.conf → autologin back into
-  #     hyprland-uwsm.
-  # Coupled to `jovian.steam.enable` like the SDDM/defaultSession switches
-  # above: without Jovian, Diego falls back to Donvini's GDM-into-Hyprland
-  # default with no autologin.
-  services.displayManager.autoLogin = lib.mkIf config.jovian.steam.enable {
-    enable = true;
-    user = "marius";
-  };
+  # ── Cold-boot autologin: REMOVED in Plan-0001 v7 Phase 1 ─────────────
+  #
+  # User explicitly chose greeter on every cold boot ("Remove autologin"
+  # answer 2026-05-17 ~01:25). The no-re-auth-during-session-switch
+  # guarantee (G3) is now preserved via the transient zzv mechanism
+  # below (Option γ): a systemd.path watches steamos-manager's zzt file
+  # and writes a matching zzv (User=marius) only while a session switch
+  # is in progress. Both zzt and zzv are wiped at next boot by the
+  # cleanup service further down.
+  #
+  # If you want the v3 behavior back (autologin everywhere), set
+  # `diego.sessionSwitch.autoLogin = "always"` — then the
+  # diego-write-zzv-always service writes zzv at boot unconditionally.
+  # If you want NO autologin even for session switches (re-auth at
+  # every cycle), set it to "off" — neither path runs.
+  #
+  # See Plan-0001 v7 §5.1 for the full reasoning and trade-off table.
 
-  # Defensive boot-time cleanup. If a previous switch-to-game-mode left
-  # /etc/sddm.conf.d/zzt-steamos-temp-login.conf behind (steamos-manager
-  # crash, hard-power-off mid-transition, daemon order issue at shutdown),
-  # SDDM would keep autologging the user into Gamescope on every subsequent
-  # boot — exactly the trap Marius hit before this fix landed. Wipe the
-  # override at boot only (multi-user.target wantedBy + RemainAfterExit), so
-  # an SDDM restart triggered by a *new* in-session switch-to-game-mode does
-  # NOT also wipe the freshly-written file. Ordered before display-manager
-  # so SDDM sees the cleaned state when it starts.
+  # ── Transient session-switch autologin: Option γ (path-unit driven) ──
+  # Fires when steamos-manager writes /etc/sddm.conf.d/zzt-steamos-temp-login.conf
+  # (i.e., during SUPER+G or "Switch to Desktop"). Writes a sibling
+  # zzv-diego-session-switch.conf with the User=marius half of the
+  # autologin pair. SDDM merges 00-nixos + zzv + zzt for the SDDM cycle
+  # → autologin fires → no password prompt during the switch.
+  # Both files wiped on next boot by the cleanup service below.
+  systemd.paths.diego-zzv-on-zzt = lib.mkIf
+    (config.jovian.steam.enable
+     && config.diego.sessionSwitch.autoLogin == "session-switch-only") {
+      description = "Watch for steamos-manager temp-login file to trigger zzv write";
+      wantedBy = [ "multi-user.target" ];
+      pathConfig = {
+        PathExists = "/etc/sddm.conf.d/zzt-steamos-temp-login.conf";
+        PathChanged = "/etc/sddm.conf.d/zzt-steamos-temp-login.conf";
+      };
+    };
+
+  systemd.services.diego-zzv-on-zzt = lib.mkIf
+    (config.jovian.steam.enable
+     && config.diego.sessionSwitch.autoLogin == "session-switch-only") {
+      description = "Write zzv autologin marker (User=marius for SDDM cycle)";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = pkgs.writeShellScript "diego-write-zzv" ''
+          set -euo pipefail
+          umask 0022
+          cat > /etc/sddm.conf.d/zzv-diego-session-switch.conf <<'EOF'
+          [Autologin]
+          User=marius
+          Session=hyprland-uwsm.desktop
+          EOF
+        '';
+      };
+    };
+
+  # ── Always-on autologin: Option α variant ─────────────────────────────
+  # Writes zzv at boot unconditionally — gives v3-style behavior (no
+  # greeter on subsequent cold boots) if the user explicitly opts in.
+  # NOT the default. User must set diego.sessionSwitch.autoLogin = "always".
+  systemd.services.diego-write-zzv-always = lib.mkIf
+    (config.jovian.steam.enable
+     && config.diego.sessionSwitch.autoLogin == "always") {
+      description = "Always-on autologin marker (Plan v7 Option α)";
+      before = [ "display-manager.service" ];
+      wantedBy = [ "multi-user.target" ];
+      after = [
+        "local-fs.target"
+        "diego-sddm-wipe-stale-gamescope-login.service"
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = pkgs.writeShellScript "diego-write-zzv-always" ''
+          set -euo pipefail
+          umask 0022
+          cat > /etc/sddm.conf.d/zzv-diego-session-switch.conf <<'EOF'
+          [Autologin]
+          User=marius
+          Session=hyprland-uwsm.desktop
+          EOF
+        '';
+      };
+    };
+
+  # ── Boot-time cleanup of session-switch markers ──────────────────────
+  # Wipes BOTH steamos-manager's zzt AND our zzv at every boot, before
+  # SDDM reads its conf.d. Defends against three failure modes:
+  #   (a) steamos-manager crash mid-switch leaving zzt behind → would
+  #       autologin into gamescope on every subsequent boot ("stuck in
+  #       Gamescope" trap — ADR-0017)
+  #   (b) zzv from a session-switch persisting across reboot → would
+  #       silently re-enable autologin (= Option α behavior) without
+  #       the user choosing it
+  #   (c) any partial-write or corrupted zzt/zzv from hard-power-off
+  # Ordered before display-manager.service via `before` + after `local-fs`.
   systemd.services.diego-sddm-wipe-stale-gamescope-login =
     lib.mkIf config.jovian.steam.enable {
-      description = "Wipe stale steamos-manager temp-login override at boot";
+      description = "Wipe stale session-switch autologin files at boot";
       before = [ "display-manager.service" ];
       wantedBy = [ "multi-user.target" ];
       after = [ "local-fs.target" ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStart = "${pkgs.coreutils}/bin/rm -f /etc/sddm.conf.d/zzt-steamos-temp-login.conf";
+        # v7: also wipes zzv-diego-session-switch.conf
+        ExecStart = "${pkgs.coreutils}/bin/rm -f /etc/sddm.conf.d/zzt-steamos-temp-login.conf /etc/sddm.conf.d/zzv-diego-session-switch.conf";
       };
     };
 
@@ -215,16 +278,24 @@
   security.pam.services = {
     sddm.fprintAuth = lib.mkForce false;
     login.fprintAuth = lib.mkForce false;
-    "polkit-1".fprintAuth = lib.mkForce false;
+    # polkit-1: configurable via diego.auth.polkitFingerprint (Plan v7 §5.1).
+    # Default false (CVE-2024-37408). Set true to accept CVE risk in exchange
+    # for fingerprint on polkit GUI dialogs.
+    "polkit-1".fprintAuth = lib.mkForce config.diego.auth.polkitFingerprint;
     sudo.fprintAuth = true;
   };
 
-  # Move pam_fprintd AFTER pam_unix on sudo (the only retained surface).
+  # Move pam_fprintd AFTER pam_unix on the surfaces where fprintd is enabled.
   # Relative offset per NixOS pam.nix docs — absolute order values are
-  # subject to nixpkgs renumbering. sddm/login overrides removed: they were
-  # reordering a rule that no longer exists in the rendered stack.
+  # subject to nixpkgs renumbering.
   security.pam.services.sudo.rules.auth.fprintd.order =
     config.security.pam.services.sudo.rules.auth.unix.order + 10;
+  # Conditional polkit-1 ordering: only applies when the option enables fprintd
+  # on polkit. When false, pam_fprintd isn't in the polkit stack at all and
+  # the rule is dropped.
+  security.pam.services."polkit-1".rules.auth.fprintd.order =
+    lib.mkIf config.diego.auth.polkitFingerprint
+      (config.security.pam.services."polkit-1".rules.auth.unix.order + 10);
 
   # Skip the polkit-agent password prompt for fingerprint enrollment.
   # Default polkit policy requires `auth_self` (user must enter password in
