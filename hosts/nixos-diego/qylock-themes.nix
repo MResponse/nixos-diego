@@ -119,6 +119,21 @@ stdenvNoCC.mkDerivation {
         height: Screen.height
         color: "black"
 
+        // Plan-0005 F1 — Wayland Cursor Fix at wrapper root.
+        // Repliziert qylock-Maintainer-Fix (commit 9b556ec, 2026-05-12)
+        // einen Layer hoeher: Qt6's pointer_enter triggert updateCursor()
+        // das window()->cursor() liest. Wenn kein Item den Cursor gesetzt
+        // hat, sendet Qt set_cursor(nullptr) = cursor versteckt. Diese
+        // MouseArea setzt window-level cursor via Item-Tree-Walk waehrend
+        // Scene-Graph-Sync (BEVOR pointer_enter). z: -1 + Qt.NoButton
+        // verhindern Event-Stealing von Sub-Theme-Items.
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.ArrowCursor
+            z: -1
+            acceptedButtons: Qt.NoButton
+        }
+
         readonly property var pool: [$pool_json]
         readonly property string picked: pool[Math.floor(Math.random() * pool.length)]
 
