@@ -79,6 +79,17 @@
       notifs.expire = true;
       launcher.showOnHover = false;  # Marius
 
+      # Plan-0006 F2a — Caelestia-Lockscreen parallel-PAM aktivieren.
+      # Quickshell PamContext × 2 (passwd + fprint) rennen gleichzeitig:
+      # Passwort tippen ODER Finger touchen, schnellere gewinnt.
+      # max 5 Fprint-Failversuche bevor pamFprintd-Pfad disabled fuer den
+      # Lock-Cycle (Reader-noise-Schutz). pam_fprintd.so kommt aus
+      # services.fprintd.enable=true (default-NixOS, ADR-0007).
+      lock = {
+        enableFprint = true;
+        maxFprintTries = 5;
+      };
+
       # Wallpaper-Pfad (Syncthing-Mount). Nur `paths.wallpaperDir` ist im aktuellen
       # Caelestia-Schema gültig — `services.wallpapers.path` wurde entfernt (lebte
       # in einer älteren Version, jetzt unbekannt → "Unknown option in config"-Toast).

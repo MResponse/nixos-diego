@@ -42,6 +42,23 @@ in
     defaultMode = "smart-sense";
   };
 
+  # Plan-0006 F3b-Extension — enable Fingerabdruck im polkit-Stack.
+  # NOETIG damit KeePassXC's Polkit Quick Unlock tatsaechlich den Finger
+  # statt Passwort nutzt. Polkit-Dialog konsultiert /etc/pam.d/polkit-1;
+  # ohne diese Option waere fprintd dort nicht eingehangen.
+  #
+  # Trade-off: CVE-2024-37408 (polkit fprintd hijack — disputed, unpatched
+  # per 2026-04). Exploit-Pfad: malicious process running as marius
+  # triggert eine polkit-action waehrend Marius vor dem Reader sitzt;
+  # naechster Finger-Tap autorisiert die Attacker-Action statt der
+  # erwarteten. Diego ist Single-User-Laptop, kein untrusted code als
+  # marius — Risk akzeptabel fuer den UX-Win von Fingerabdruck-KeePassXC
+  # (Marius's expliziter Wunsch "ideal waere Fingerabdruck").
+  #
+  # Revert: Wert auf `false` setzen (oder Zeile entfernen) →
+  # polkit-Dialog zurueck zu Password-only.
+  diego.auth.polkitFingerprint = true;
+
   # Boot-menu label: identifies generations built from this baseline as the
   # known-good post-Plan-0002 stable point (session-switch UX + Gamescope
   # power-mode integration verified end-to-end 2026-05-17). When picking a
@@ -414,8 +431,19 @@ in
   # points later, add a per-service `fprintAuth = lib.mkForce false;` line.
   services.fprintd.enable = true;
   security.pam.services = {
-    sddm.fprintAuth = lib.mkForce false;
-    login.fprintAuth = lib.mkForce false;
+    # Plan-0006 F2b — re-enable fingerprint on SDDM (login substack).
+    # Maldives-theme-blocker (alte Begruendung fuer `login.fprintAuth =
+    # lib.mkForce false`) ist obsolet seit qylock-random (Plan-0004/5).
+    # qylock-themes rendern PAM-Conversation-Messages NICHT visuell —
+    # Workflow: Marius drueckt Enter auf LEEREM Passwort-Feld → fprintd
+    # activates silently → Finger touch → login. Gilt fuer Cold-Boot UND
+    # Gamescope-Switch (gleicher PAM-Stack). pam_unix-before-pam_fprintd
+    # order (NixOS PR #171140) macht password-first sicher — Reader-Fail
+    # bricht nicht Login.
+    # (login.fprintAuth = true ist NixOS-default wenn services.fprintd.enable;
+    # daher kein expliziter Eintrag noetig — wir entfernen nur den
+    # `mkForce false` override.)
+
     # polkit-1: configurable via diego.auth.polkitFingerprint (Plan v7 §5.1).
     # Default false (CVE-2024-37408). Set true to accept CVE risk in exchange
     # for fingerprint on polkit GUI dialogs.
@@ -428,6 +456,13 @@ in
   # subject to nixpkgs renumbering.
   security.pam.services.sudo.rules.auth.fprintd.order =
     config.security.pam.services.sudo.rules.auth.unix.order + 10;
+  # Plan-0006 F2b — selbe ordering fuer login (das SDDM-greeter via
+  # substack nutzt). Ohne diese reorder waere pam_fprintd at order 11400
+  # vor pam_unix 11700 → fprintd-first-prompt → "30s hang bei
+  # password-typing" Bug (sddm/sddm#1840). Reorder macht password-first
+  # Default; Fingerabdruck nur bei leerem/falschem Passwort.
+  security.pam.services.login.rules.auth.fprintd.order =
+    config.security.pam.services.login.rules.auth.unix.order + 10;
   # Conditional polkit-1 ordering: only applies when the option enables fprintd
   # on polkit. When false, pam_fprintd isn't in the polkit stack at all and
   # the rule is dropped.
@@ -450,6 +485,41 @@ in
         return polkit.Result.YES;
       }
     });
+  '';
+
+  # Plan-0006 F3b — KeePassXC develop-snapshot Overlay fuer Polkit Quick
+  # Unlock (Fingerabdruck-basierter DB-unlock). KeePassXC 2.8 ist unreleased;
+  # develop hat PR #8983 gemerged. Overlay greift global (HM keepmenu.nix
+  # + system gleich), kein PATH-conflict. Re-pin monthly oder bei Bedarf.
+  # Drop overlay wenn nixpkgs 2.8.0 ships → Plan-0007.
+  nixpkgs.overlays = [ (import ../../pkgs/keepassxc-overlay.nix) ];
+
+  # (keepassxc ist bereits in services.nix environment.systemPackages —
+  # die Overlay-Aenderung greift dort transparent. Polkit-policy-Pfad
+  # /run/current-system/sw/share/polkit-1/actions/ wird via dem
+  # existierenden systemPackages-Eintrag versorgt.)
+
+  # Plan-0006 F1 — Touchpad/Touchscreen-Access im SDDM-Greeter.
+  # Diego's i2c-HID Pointer-Devices (Synaptics-Touchpad, ELAN-Touchscreen)
+  # bekommen ohne extra rule weder seat-tag noch ACL — sddm-user (kein
+  # input-group) kann /dev/input/event* nicht oeffnen → weston-kiosk im
+  # Greeter sieht keine Pointer-Events.
+  #
+  # Keyboard funktioniert nur accidentally weil STEAMOS_POWER_BUTTON-rule
+  # (70-steamos-power-button.rules) ihm uaccess+seat anhaengt.
+  #
+  # Diese rule fuegt seat0+uaccess fuer Touchpad+Touchscreen hinzu.
+  # - SDDM-greeter (sddm user, active seat0) bekommt rw-ACL → weston-kiosk +
+  #   libinput koennen lesen.
+  # - Marius-session (marius user) bekommt selbe ACL — Hyprland nutzt's
+  #   nicht direkt (geht ueber libseat fd-passing), aber redundant ist OK.
+  #
+  # Security: ID_INPUT_MOUSE (external USB-Mice) NICHT getaggt — vermeidet
+  # ungewollten Override von Device-spezifischen udev-Quirks; bei Bedarf
+  # erweiterbar.
+  services.udev.extraRules = ''
+    SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess", TAG+="seat", ENV{ID_SEAT}="seat0"
+    SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", TAG+="uaccess", TAG+="seat", ENV{ID_SEAT}="seat0"
   '';
 
   # Expose marius' shared-claude commands and agents to `sudo claude` sessions.
