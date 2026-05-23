@@ -67,6 +67,32 @@ stdenvNoCC.mkDerivation {
           echo "QtVersion=6" >> "$meta"
         fi
       fi
+
+      # Plan-0012 F1 — patch sub-theme MouseArea acceptedButtons (ADR-0030).
+      # qylock-upstream commit 9b556ec (Wayland Cursor Fix) inserted
+      #   MouseArea { anchors.fill: parent; cursorShape: Qt.ArrowCursor; z: -1 }
+      # als FIRST CHILD jedes Sub-Theme Root-Rectangle, OHNE
+      # `acceptedButtons: Qt.NoButton`. Default `acceptedButtons = Qt.LeftButton`
+      # plus anchors.fill: parent + identisches bounding-rect zu Layout-Children
+      # = Qt6-hit-test-Edge-Case wo MouseArea Klicks auf Session-Dropdown /
+      # Login-Button konsumiert. Plan-0005 F1 fixte nur den qylock-random
+      # Wrapper, nicht die 31 Sub-Themes — Marius's "SDDM-Maus-tot"-Symptom.
+      #
+      # sed-Pattern: matche jeden Block "// Wayland Cursor Fix" bis schliessende
+      # `}`-Zeile, und nach der `cursorShape:.*Qt.ArrowCursor`-Zeile
+      # `acceptedButtons: Qt.NoButton` einfuegen.
+      # `|| true` schluckt Fehler falls Pattern in einem Theme nicht greift
+      # (verify via Plan-Test-Step).
+      #
+      # Quelle: https://doc.qt.io/qt-6/qml-qtquick-mousearea.html
+      #   "In order to only set a mouse cursor shape for a region without
+      #   reacting to mouse events set the acceptedButtons to none."
+      main_qml="$out/share/sddm/themes/$theme/Main.qml"
+      if [ -f "$main_qml" ]; then
+        sed -i '/\/\/ Wayland Cursor Fix/,/^[[:space:]]*}[[:space:]]*$/{
+          /cursorShape:.*Qt\.ArrowCursor/a\        acceptedButtons: Qt.NoButton
+        }' "$main_qml" || true
+      fi
     done
 
     # Build the pool list from what we just bundled (skip the wrapper-self).
