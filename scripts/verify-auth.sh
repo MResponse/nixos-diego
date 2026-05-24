@@ -80,11 +80,19 @@ fi
 
 echo
 echo "═══ V3: KeePassXC 2.8 + Polkit Quick Unlock readiness ═══"
-kp_ver=$(keepassxc --version 2>&1 | head -1 || echo "?")
-if echo "$kp_ver" | grep -q "2\.8"; then
-  ok "KeePassXC version: $kp_ver"
+# keepassxc --version braucht X11/Wayland-Display zum starten — display-free
+# Probe: nix-store query auf den binary-path + version-string.
+KP_BIN=$(readlink -f "$(which keepassxc 2>/dev/null)" 2>/dev/null)
+if [ -x "$KP_BIN" ]; then
+  # version aus dem store-path-Namen ableiten (Nix-Convention)
+  kp_ver=$(basename "$(dirname "$(dirname "$KP_BIN")")" | sed 's/^[a-z0-9]*-//')
+  if echo "$kp_ver" | grep -q "2\.8"; then
+    ok "KeePassXC version: $kp_ver"
+  else
+    bad "KeePassXC version unexpected: $kp_ver (Plan-0012 F3 overlay broken?)"
+  fi
 else
-  bad "KeePassXC version unexpected: $kp_ver (Plan-0012 F3 overlay broken?)"
+  bad "KeePassXC binary not found"
 fi
 if ls /run/current-system/sw/share/polkit-1/actions/ 2>/dev/null | grep -q "keepassxc"; then
   ok "Polkit-action org.keepassxc.KeePassXC.policy registered"
@@ -96,8 +104,13 @@ if pkaction --action-id org.keepassxc.KeePassXC.unlockDatabase 2>/dev/null | gre
 else
   bad "pkaction returns no action — Polkit-policy not picked up"
 fi
-KP_BIN=$(which keepassxc 2>/dev/null)
-if [ -x "$KP_BIN" ] && ldd "$KP_BIN" 2>/dev/null | grep -q libkeyutils; then
+# ldd auf KeePassXC C-Wrapper zeigt nur 3 deps (es ist ein Wrapper); muss
+# auf das REAL binary `.keepassxc-wrapped` probiert werden (nixpkgs pattern).
+KP_DIR=$(dirname "$KP_BIN")
+KP_REAL="$KP_DIR/.keepassxc-wrapped"
+if [ -x "$KP_REAL" ] && ldd "$KP_REAL" 2>/dev/null | grep -q libkeyutils; then
+  ok "KeePassXC linked to libkeyutils (Polkit Quick Unlock kernel-keyring storage)"
+elif [ -x "$KP_BIN" ] && ldd "$KP_BIN" 2>/dev/null | grep -q libkeyutils; then
   ok "KeePassXC linked to libkeyutils (Polkit Quick Unlock kernel-keyring storage)"
 else
   bad "KeePassXC NOT linked to libkeyutils (Plan-0012 F3.1 broken?)"
