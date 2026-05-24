@@ -555,8 +555,28 @@ in
       "libvirtd"
       "audio"
       "video"
+      "tss"  # Plan-0014 — TPM2-Zugriff fuer systemd-creds (KeePassXC auto-unlock)
     ];
     packages = with pkgs; [ ];
+  };
+
+  # Plan-0014 — TPM2 fuer KeePassXC initial-unlock ohne Master-PW-Typing.
+  # `systemd-creds encrypt --tpm2-device=auto` bindet ein Credential an die
+  # TPM2-Hardware (HP ZBook). Disk-stolen Angreifer kann das verschluesselte
+  # Credential nicht entschluesseln ohne den TPM-Chip dieser Maschine.
+  #
+  # `abrmd.enable = false` weil systemd-creds direkt /dev/tpmrm0 nutzt
+  # (kernel-resident TPM Resource Manager) — der user-space tpm2-abrmd-
+  # Daemon ist nicht noetig und verbraucht nur Speicher.
+  #
+  # Die `tss`-Gruppe wird von nixpkgs's security.tpm2-modul deklariert
+  # und auf /dev/tpmrm0 ueber udev-Rule angewendet (mode 660 root:tss).
+  # Marius's user-Service kann dann via TPM auf das Credential zugreifen.
+  #
+  # Verwandt: Plan-0014, hm-modules/keepassxc-fp-unlock.nix
+  security.tpm2 = {
+    enable = true;
+    abrmd.enable = false;
   };
 
   system.stateVersion = "25.11";

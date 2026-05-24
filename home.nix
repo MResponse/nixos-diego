@@ -25,6 +25,7 @@
     ./hm-modules/caelestia.nix
     ./hm-modules/services.nix
     ./hm-modules/keepmenu.nix
+    ./hm-modules/keepassxc-fp-unlock.nix   # Plan-0014 — TPM2-sealed Master-PW auto-unlock
     ./hm-modules/darkman.nix
     ./hm-modules/gtk.nix
     inputs.caelestia-shell.homeManagerModules.default

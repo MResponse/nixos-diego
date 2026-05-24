@@ -123,7 +123,12 @@ in
 
       exec-once = [
         "/run/current-system/sw/libexec/polkit-kde-authentication-agent-1"
-        "keepassxc /home/marius/Syncthing_lighteningv1.0/Organisatorisches/MRPrivat.kdbx"
+        # Plan-0014 — keepassxc-fp-unlock wrapper:
+        # Wenn ~/.config/keepassxc-fp/master-pw.cred existiert (one-time
+        # Setup via `kp-fp-setup` durchgefuehrt) → TPM2-decrypt + auto-open.
+        # Sonst → graceful fallback auf interactive keepassxc (= status quo).
+        # Implementiert in hm-modules/keepassxc-fp-unlock.nix.
+        "keepassxc-fp-unlock"
         "nm-applet --indicator"
         "wl-paste --type text --watch cliphist store -max-items 100 -max-size 2000000"
         "wl-paste --type image --watch cliphist store -max-items 100 -max-size 2000000"
