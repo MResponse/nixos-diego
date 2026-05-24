@@ -1,6 +1,7 @@
 {
   inputs,
   pkgs,
+  lib,
   username,
   ...
 }:
@@ -50,7 +51,32 @@
     "application/pdf" = [ "zathura.desktop" ];
     "image/*" = [ "viewnior.desktop" ];
     "video/*" = [ "mpv.desktop" ];
+    # Plan-0009 S3: SteamVR's vrmonitor URL scheme (used by Developer
+    # settings → "Save Frames to Disk" etc.). Without this entry, Gnome
+    # shows "No Apps available — No apps installed that can open 'vrmonitor://…'".
+    "x-scheme-handler/vrmonitor" = [ "valve-URI-vrmonitor.desktop" ];
   };
+
+  # Plan-0009 S3: install the .desktop file that handles vrmonitor:// URLs.
+  # The Exec= path is fixed to the user-installed SteamVR binary; if Steam
+  # moves the install, the URL handler stops working (warned by vr-doctor).
+  xdg.desktopEntries.valve-URI-vrmonitor = {
+    name = "SteamVR URI Handler";
+    noDisplay = true;
+    exec = "/home/${username}/.local/share/Steam/steamapps/common/SteamVR/bin/linux64/vrmonitor %U";
+    mimeType = [ "x-scheme-handler/vrmonitor" ];
+  };
+
+  # Plan-0009 S2: Register SteamVR as the host's OpenXR runtime so OpenXR
+  # games (Beat Saber, modern Unity-VR, etc.) find it. Imperative activation
+  # because the source path is Steam's install dir (not /nix/store) and
+  # xdg.configFile.source expects a store path.
+  home.activation.openxrSteamVRRuntime = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    run mkdir -p /home/${username}/.config/openxr/1
+    run ln -sfT \
+      /home/${username}/.local/share/Steam/steamapps/common/SteamVR/steamxr_linux64.json \
+      /home/${username}/.config/openxr/1/active_runtime.json
+  '';
 
   systemd.user.startServices = "sd-switch";
 }

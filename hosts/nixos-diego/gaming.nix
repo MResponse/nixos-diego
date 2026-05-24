@@ -22,12 +22,15 @@
   # via LSFG_PROCESS=1 reaktivierbar (Layer bleibt im Store).
   services.lsfg-vk.enable = lib.mkForce false;
 
-  # RDNA 3.5 (Strix Halo gfx1151) Mesa/RADV-Tuning:
-  # - gpl: Graphics Pipeline Library — kein Shader-Compilation-Stutter beim
-  #   ersten Spielladen
-  # - nggc: Next-Gen-Geometry Culling — schneller geometry-throughput
-  # - sam: Smart Access Memory — full GPU-Resource-Mapping über PCIe
-  environment.sessionVariables.RADV_PERFTEST = "gpl,nggc,sam";
+  # RDNA 3.5 (Strix Halo gfx1151) Mesa/RADV-Tuning (Plan-0007 F8, ADR-0028):
+  # - video_encode: Vulkan-Video-Encoder für Steam-Link-VR-Streaming (HEVC
+  #   hardware-encoded auf-Host für Pico-4 Steam-Link). Mesa 25.2+ Pflicht.
+  # - sam: Smart Access Memory (PCIe-Resizable-BAR) — full GPU-Resource-Mapping.
+  #
+  # Entfernt: gpl + nggc — auf RDNA 3.5 (GFX10.3+) bereits Mesa-default seit
+  # Commit 52413a9; explicit-setzen war 2026-Cargo-Cult (Phoronix Mesa 25.2
+  # Strix-Halo-Review). RADV-Docs: https://docs.mesa3d.org/drivers/radv.html
+  environment.sessionVariables.RADV_PERFTEST = "video_encode,sam";
 
   jovian = {
     steam = {

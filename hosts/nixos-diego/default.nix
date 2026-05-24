@@ -31,6 +31,7 @@ in
     ./security.nix
     ./power-modes.nix
     ./gamescope-power.nix    # Plan-0002 §2.4 — force `performance` while Gamescope is active
+    ./vr.nix                 # SteamVR cap + Steam Link VR firewall (ADR-0027)
   ];
 
   # Five-mode power management replicating HP's Windows myHP modes
