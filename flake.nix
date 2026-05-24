@@ -111,6 +111,13 @@
           {
             nixpkgs.overlays = overlays;
             home-manager = {
+              # Plan-0006 F3b: HM teilt sich pkgs mit NixOS (inkl.
+              # Overlays wie pkgs/keepassxc-overlay.nix). Ohne das wuerde
+              # HM eine eigene pkgs-Instanz ohne Overlay nutzen, und
+              # hm-modules/keepmenu.nix wuerde das alte keepassxc-2.7.12
+              # statt unseres snapshot-Builds bekommen.
+              useGlobalPkgs = true;
+              useUserPackages = true;
               extraSpecialArgs = { inherit username mail fullName inputs; };
               backupFileExtension = "hm-backup";
               users.${username} = import ./home.nix;
