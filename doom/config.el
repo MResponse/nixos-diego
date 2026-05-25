@@ -483,7 +483,13 @@
         org-pretty-entities t))
 
 (setq org-todo-keywords
-      '((sequence "TODO(t)" "NEXT(n)" "HOLD(h)" "|" "DONE(d)")))
+      '((sequence "TODO(t)" "NEXT(n)" "DOING(g)" "HOLD(h)" "|" "DONE(d)")))
+
+(after! org
+  (setq org-todo-keyword-faces
+        '(("NEXT"  . (:foreground "#FFCC66" :weight bold))
+          ("DOING" . (:foreground "#4FC3F7" :weight bold))
+          ("HOLD"  . (:foreground "#888888" :weight bold)))))
 ;; General Settings:1 ends here
 
 ;; [[file:config.org::*Org Roam][Org Roam:1]]
@@ -743,6 +749,35 @@
                              :order 1)
                             (:discard (:anything t))))))))
 
+          ;; --- Three-View: Queue View (Plan-0005) ---
+          ;; All open items at depth >= 4 in today.org, sorted by priority.
+          ;; Depth filter (not :Do: tag) avoids the "silent tag required" trap.
+          ("q" "Queue — today's open Dos (pick from here)"
+           ((tags-todo "LEVEL>=4/!TODO|NEXT|DOING"
+                       ((org-agenda-overriding-header "📋 QUEUE — pick next Do")
+                        (org-agenda-files '("~/org/gtd/today.org"))
+                        (org-agenda-prefix-format "  %b ")
+                        (org-agenda-sorting-strategy '(priority-down todo-state-up alpha-up)))))
+           ((org-agenda-breadcrumbs-separator " → ")))
+
+          ;; --- Three-View: Doing View (Plan-0005) ---
+          ;; Scoped to today.org. Per-block max-entries truncates AFTER sort,
+          ;; so priority-down ensures "top 1" is the highest priority.
+          ("D" "Doing — current + next"
+           ((todo "DOING"
+                  ((org-agenda-overriding-header "🎯 NOW DOING")
+                   (org-agenda-files '("~/org/gtd/today.org"))
+                   (org-agenda-prefix-format "  %b ")
+                   (org-agenda-sorting-strategy '(priority-down todo-state-up))
+                   (org-agenda-max-entries 1)))
+            (todo "NEXT"
+                  ((org-agenda-overriding-header "⏭  NEXT UP")
+                   (org-agenda-files '("~/org/gtd/today.org"))
+                   (org-agenda-prefix-format "  %b ")
+                   (org-agenda-sorting-strategy '(priority-down todo-state-up))
+                   (org-agenda-max-entries 1))))
+           ((org-agenda-breadcrumbs-separator " → ")))
+
           ("d" "Completed today"
            agenda ""
            ((org-agenda-start-day "+0d")
@@ -798,6 +833,67 @@
 (map! :leader
       :desc "Agenda dashboard" "A" (lambda () (interactive) (org-agenda nil "o")))
 ;; Org agenda:1 ends here
+
+;; [[file:config.org::*Three-View Daily Planning (Plan-0005)][Three-View Daily Planning (Plan-0005):1]]
+(defun my/today-three-view ()
+  "Open today.org left, Queue View top-right, Doing View bottom-right.
+   Overrides org-agenda-window-setup locally so the agenda calls don't
+   destroy the layout (existing config has 'only-window).
+
+   On narrow frames (<120 cols) falls back to two-pane stacked layout:
+   today.org on top, Queue View bottom. Doing View accessed via SPC o T D.
+
+   NOT IDEMPOTENT: calling this on an existing 3-pane layout rebuilds it
+   from scratch. Predictable end-state at the cost of losing cursor
+   position in the right panes."
+  (interactive)
+  (delete-other-windows)
+  (find-file "~/org/gtd/today.org")
+  (if (< (frame-width) 120)
+      (progn
+        (split-window-below)
+        (other-window 1)
+        (let ((org-agenda-window-setup 'current-window))
+          (org-agenda nil "q")))
+    (split-window-right)
+    (other-window 1)
+    (let ((org-agenda-window-setup 'current-window))
+      (org-agenda nil "q"))
+    (split-window-below)
+    (other-window 1)
+    (let ((org-agenda-window-setup 'current-window))
+      (org-agenda nil "D"))))
+
+;; Auto-refresh agenda when today.org saves — eliminates the
+;; "press g in which window?" beginner confusion.
+;; org-agenda-redo-all iterates org-agenda-buffer-list; the `t` arg
+;; requests exhaustive re-glob of org-agenda-files.
+;; Wrapped in ignore-errors so an agenda redraw failure can't block save.
+(defun my/refresh-agenda-on-today-save ()
+  "If today.org just saved, redraw the agenda silently."
+  (ignore-errors
+    (when (and buffer-file-name
+               (string-suffix-p "today.org" buffer-file-name)
+               (get-buffer "*Org Agenda*"))
+      (with-current-buffer "*Org Agenda*"
+        (org-agenda-redo-all t)))))
+
+(add-hook 'after-save-hook #'my/refresh-agenda-on-today-save)
+
+(map! :leader
+      (:prefix-map ("o T" . "Today")
+       :desc "Today: Open file"           "o" (lambda () (interactive)
+                                                (find-file "~/org/gtd/today.org"))
+       :desc "Today: Queue view"          "Q" (lambda () (interactive)
+                                                (org-agenda nil "q"))
+       :desc "Today: Doing view"          "D" (lambda () (interactive)
+                                                (org-agenda nil "D"))
+       :desc "Today: Layout (three-pane)" "L" #'my/today-three-view
+       :desc "Today: Refresh agenda"      "r" (lambda () (interactive)
+                                                (when (get-buffer "*Org Agenda*")
+                                                  (with-current-buffer "*Org Agenda*"
+                                                    (org-agenda-redo-all t))))))
+;; Three-View Daily Planning (Plan-0005):1 ends here
 
 ;; [[file:config.org::*Dired with Dirvish][Dired with Dirvish:1]]
 ;;; NOTE: Removed SPC d d / SPC d j — they conflicted with SPC d (DAP debugger prefix).
