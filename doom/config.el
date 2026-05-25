@@ -1,3 +1,7 @@
+;; [[file:config.org::*render-core (emacs-reader native module)][render-core (emacs-reader native module):1]]
+(provide 'render-core)
+;; render-core (emacs-reader native module):1 ends here
+
 ;; [[file:config.org::*Performance Optimizations][Performance Optimizations:1]]
 ;; === Garbage Collection (works with Doom's gcmh) ===
 ;; Doom uses gcmh which sets high threshold during activity, low when idle.
@@ -654,6 +658,13 @@
   ;; Use full frame for agenda (more horizontal space)
   (setq org-agenda-window-setup 'only-window)
 
+  ;; Sticky agenda buffers — each custom command keeps its own buffer
+  ;; (`*Org Agenda(q)*`, `*Org Agenda(D)*` etc.) instead of clobbering
+  ;; the shared `*Org Agenda*` one. Required for my/today-three-view to
+  ;; show Queue + Doing in two separate panes without one overwriting
+  ;; the other.
+  (setq org-agenda-sticky t)
+
   ;; Tags at right edge of window, not a fixed column
   (setq org-agenda-tags-column 'auto)
 
@@ -840,6 +851,11 @@
    Overrides org-agenda-window-setup locally so the agenda calls don't
    destroy the layout (existing config has 'only-window).
 
+   Relies on `org-agenda-sticky` (set in this config) so each Custom
+   Command Key gets its own buffer (`*Org Agenda(q)*` for Queue,
+   `*Org Agenda(D)*` for Doing). Without sticky, both calls would
+   share `*Org Agenda*` and the second would clobber the first.
+
    On narrow frames (<120 cols) falls back to two-pane stacked layout:
    today.org on top, Queue View bottom. Doing View accessed via SPC o T D.
 
@@ -866,17 +882,15 @@
 
 ;; Auto-refresh agenda when today.org saves — eliminates the
 ;; "press g in which window?" beginner confusion.
-;; org-agenda-redo-all iterates org-agenda-buffer-list; the `t` arg
-;; requests exhaustive re-glob of org-agenda-files.
+;; org-agenda-redo-all iterates ALL buffers in (org-agenda-buffer-list)
+;; — so both `*Org Queue*` and `*Org Doing*` panes refresh together.
 ;; Wrapped in ignore-errors so an agenda redraw failure can't block save.
 (defun my/refresh-agenda-on-today-save ()
-  "If today.org just saved, redraw the agenda silently."
+  "If today.org just saved, redraw all visible agenda buffers silently."
   (ignore-errors
     (when (and buffer-file-name
-               (string-suffix-p "today.org" buffer-file-name)
-               (get-buffer "*Org Agenda*"))
-      (with-current-buffer "*Org Agenda*"
-        (org-agenda-redo-all t)))))
+               (string-suffix-p "today.org" buffer-file-name))
+      (org-agenda-redo-all t))))
 
 (add-hook 'after-save-hook #'my/refresh-agenda-on-today-save)
 
@@ -890,9 +904,7 @@
                                                 (org-agenda nil "D"))
        :desc "Today: Layout (three-pane)" "L" #'my/today-three-view
        :desc "Today: Refresh agenda"      "r" (lambda () (interactive)
-                                                (when (get-buffer "*Org Agenda*")
-                                                  (with-current-buffer "*Org Agenda*"
-                                                    (org-agenda-redo-all t))))))
+                                                (org-agenda-redo-all t))))
 ;; Three-View Daily Planning (Plan-0005):1 ends here
 
 ;; [[file:config.org::*Dired with Dirvish][Dired with Dirvish:1]]
@@ -929,6 +941,13 @@
 
 ;; [[file:config.org::*Document Reader (emacs-reader)][Document Reader (emacs-reader):1]]
 (use-package! reader
+  ;; TEMPORARILY DISABLED 2026-05-25: `render-core.so` native module is not
+  ;; built (mupdf-dev not in NixOS yet). reader.el:35 does
+  ;; (require 'render-core) which errors and breaks org-mode-file loading
+  ;; via the evil-collection-reader pull-in chain. Re-enable after adding
+  ;; mupdf-dev to programming.nix and rebuilding render-core (see
+  ;; ~/.config/emacs/.local/straight/repos/reader/Makefile).
+  :disabled t
   :mode (("\\.pdf\\'" . reader-mode)
          ("\\.epub\\'" . reader-mode)
          ("\\.mobi\\'" . reader-mode)
