@@ -486,14 +486,33 @@
         org-pomodoro-play-sounds nil
         org-pretty-entities t))
 
-(setq org-todo-keywords
-      '((sequence "TODO(t)" "NEXT(n)" "DOING(g)" "HOLD(h)" "|" "DONE(d)")))
-
+;; org-todo-keywords MUST be inside (after! org ...) because Doom's
+;; :lang org module sets its own default keywords via after!, which
+;; runs after a top-level setq → our values would be clobbered.
+;; Field-test confirmed 2026-05-25: with bare setq, Doom's huge default
+;; keyword set ([t]TODO/[p]PROJ/[r]LOOP/[s]STRT/[w]WAIT/[h]HOLD/[i]IDEA/
+;; [d]DONE/[k]KILL plus checkbox + okay-yes-no sequences) was active.
 (after! org
+  (setq org-todo-keywords
+        '((sequence "TODO(t)" "NEXT(n)" "DOING(g)" "HOLD(h)" "|" "DONE(d)")))
+
+  ;; Fallback faces for plain text rendering (no org-modern context).
   (setq org-todo-keyword-faces
         '(("NEXT"  . (:foreground "#FFCC66" :weight bold))
           ("DOING" . (:foreground "#4FC3F7" :weight bold))
-          ("HOLD"  . (:foreground "#888888" :weight bold)))))
+          ("HOLD"  . (:foreground "#888888" :weight bold))))
+
+  ;; Per-state chip styling for org-modern. Without this org-modern
+  ;; renders ALL TODO-states with one uniform salmon chip, defeating
+  ;; the scan-at-a-glance value of having distinct workflow states in
+  ;; the Queue/Doing agenda views. Five-state palette tuned for
+  ;; legibility on both modus-operandi (light) and modus-vivendi (dark).
+  (setq org-modern-todo-faces
+        '(("TODO"  :background "#E06C75" :foreground "#1E1E1E" :weight bold)
+          ("NEXT"  :background "#E5C07B" :foreground "#1E1E1E" :weight bold)
+          ("DOING" :background "#61AFEF" :foreground "#1E1E1E" :weight bold)
+          ("HOLD"  :background "#5C6370" :foreground "#FFFFFF" :weight bold)
+          ("DONE"  :background "#98C379" :foreground "#1E1E1E" :weight bold))))
 ;; General Settings:1 ends here
 
 ;; [[file:config.org::*Org Roam][Org Roam:1]]
@@ -571,7 +590,13 @@
 (use-package! org-auto-tangle
   :hook (org-mode . org-auto-tangle-mode)
   :config
-  (setq org-auto-tangle-default t))
+  ;; Opt-in tangling: only org files with `#+auto_tangle: yes` get
+  ;; tangled on save. Default `t` was triggering the no-op tangle pass
+  ;; on every save of org content files (today.org, dailies, notes.org
+  ;; etc.) — each save froze the buffer for ~0.4s and spammed the echo
+  ;; area with "Tangling … completed".
+  ;; config.org has `#+auto_tangle: yes` near top of file to opt in.
+  (setq org-auto-tangle-default nil))
 ;; Org-auto-tangle:1 ends here
 
 ;; [[file:config.org::*Org Capture][Org Capture:1]]
