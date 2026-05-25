@@ -16,8 +16,11 @@
       "ctrl+l" = "neighboring_window right";
 
       # Splits (mirrors vim <C-w>v / <C-w>s)
+      # Naming-Falle: Kitty's `hsplit` = horizontale Trennlinie = Fenster
+      # übereinander; `vsplit` = vertikale Trennlinie = Fenster nebeneinander.
       "ctrl+backslash" = "launch --location=vsplit";
-      "ctrl+minus" = "launch --location=hsplit";
+      "ctrl+minus" = "launch --location=hsplit";   # Fenster darunter
+      "ctrl+plus" = "launch --location=vsplit";    # Fenster daneben
       "ctrl+shift+w" = "close_window";
 
       # Tabs (bracket nav, doom-style)
