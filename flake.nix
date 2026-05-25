@@ -94,8 +94,13 @@
 
       mkDesktopHost = hostname: nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit inputs username; };
+        specialArgs = { inherit inputs username; expectedHostname = hostname; };
         modules = [
+          # Plan-0015 / ADR-0035: cross-host-switch-prevention. Must be
+          # early so its assertion fires before downstream modules can
+          # produce confusing errors masking the real problem.
+          ./modules/hostname-safety.nix
+
           # Local configuration
           ./configuration.nix
           ./hosts/${hostname}
@@ -128,8 +133,11 @@
 
       mkServerHost = hostname: nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit inputs; };
+        specialArgs = { inherit inputs; expectedHostname = hostname; };
         modules = [
+          # Plan-0015 / ADR-0035: cross-host-switch-prevention.
+          ./modules/hostname-safety.nix
+
           ./configuration.nix
           ./hosts/${hostname}
         ];

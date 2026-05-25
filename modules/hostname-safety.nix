@@ -27,7 +27,7 @@
 # - Option-Def: nixos/modules/system/activation/pre-switch-check.nix:33-54
 # - Doc-String live geprueft via `nix eval` am 2026-05-25.
 
-{ config, lib, expectedHostname, ... }:
+{ config, lib, pkgs, expectedHostname, ... }:
 
 {
   assertions = [
@@ -54,9 +54,18 @@
   system.preSwitchChecks.crossHostGuard = ''
     set -eu
 
+    # PATH-Hardening: switch-to-configuration laeuft via `systemd-run
+    # --service-type=exec`, was den umgebenden PATH NICHT durchreicht.
+    # Wir brauchen externe Binaries (rm) — also explizit den coreutils-
+    # Pfad anhaengen. Bash-Builtins (test, echo, [, < redirection)
+    # funktionieren ohne PATH. Lesson learned from Plan-0015 v1: ein
+    # `cat /proc/sys/kernel/hostname` ohne PATH wurde silently zu
+    # `actual=""` → fail-open → kein Refusal.
+    export PATH=${lib.makeBinPath [ pkgs.coreutils ]}:''${PATH:-}
+
     # switch-to-configuration ruft pre-switch-check mit zwei Args auf:
-    # $1 = neuer toplevel-Pfad, $2 = action (switch/boot/test/dry-activate).
-    new_system="''${1:-}"
+    # $1 = neuer toplevel-Pfad (ungenutzt), $2 = action
+    # (switch/boot/test/dry-activate).
     action="''${2:-}"
 
     # 1) Fresh-Install-Bypass: bei der allerersten Installation gibt es
@@ -71,7 +80,8 @@
       *) exit 0 ;;
     esac
 
-    actual=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "")
+    # Bash-builtin file-read (kein externes cat noetig).
+    actual=$(< /proc/sys/kernel/hostname)
     expected="${config.networking.hostName}"
     sentinel=/etc/.nix-allow-cross-host-switch
 

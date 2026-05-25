@@ -2,18 +2,47 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **DIEGO-BRANCH NOTE (Plan-0015 / ADR-0035):** This repo is a fork-of-fork.
+> Branch `master` mirrors upstream `donvini94/nixos-config` (dracula + alucard
+> hosts). Branch `diego` adds a third host `nixos-diego` (HP ZBook Ultra G1a
+> 14", Ryzen AI Max+ PRO 395, AMD Radeon 8060S iGPU — **no NVIDIA**). The
+> live machine `~/nixos-config` runs on is `nixos-diego`. Building or switching
+> to any other host (`dracula`, `alucard`) on THIS machine is wrong and will
+> be REFUSED at activation time by the cross-host-switch-guard
+> (`modules/hostname-safety.nix`).
+>
+> If you see a "REFUSING TO SWITCH: cross-host configuration detected" banner,
+> the safety net just caught a mistake — do NOT touch the sentinel-file
+> `/etc/.nix-allow-cross-host-switch` to bypass it without explicit user
+> approval. The right fix is almost always: use `.#nixos-diego` as the target.
+
 ## Overview
 
-This is a NixOS configuration repository managing two systems: a desktop (dracula) and a home server (alucard). The desktop uses Hyprland with caelestia-shell for the desktop shell (bar, notifications, wallpaper, lock screen, launcher). The server runs multiple services behind nginx reverse proxies.
+On branch `diego`, this repository manages THREE systems:
+- `nixos-diego` — HP ZBook Ultra G1a laptop (AMD-only), the local active host
+- `dracula` — upstream's desktop (AMD + NVIDIA), inherited from master, **not built here**
+- `alucard` — upstream's home server (Hetzner QEMU), inherited from master, **not built here**
+
+The desktop hosts use Hyprland with caelestia-shell (bar, notifications,
+wallpaper, lock screen, launcher). On `nixos-diego` Hyprland runs via UWSM
+(see ADR-0017) so steamosctl session-switching works. The server runs
+multiple services behind nginx reverse proxies.
 
 ## Build and Deployment Commands
 
 ### Building Configurations
 ```bash
-# Desktop (AMD + NVIDIA)
-sudo nixos-rebuild switch --flake .#dracula
+# Diego (the local machine on branch `diego`)
+sudo nixos-rebuild switch --flake .#nixos-diego
 
-# Server (Hetzner QEMU)
+# Or use the fish-Abbrev (hm-modules/fish.nix:12-14):
+#   switch          # → sudo nixos-rebuild switch --flake ~/nixos-config#$(hostname)
+#   boot            # → same, but with `boot` action
+#   test-switch     # → same, but with `test` action
+# The abbrev auto-substitutes the running machine's hostname.
+# Only available in interactive Fish sessions, NOT in Bash tools.
+
+# Server (only built from a machine where alucard is the real host)
 sudo nixos-rebuild switch --flake .#alucard
 ```
 
@@ -22,8 +51,8 @@ sudo nixos-rebuild switch --flake .#alucard
 nix flake update          # Update flake inputs
 nix flake check           # Check configuration
 nix flake show            # Show flake outputs
-sudo nixos-rebuild build --flake .#dracula    # Test build without switching
-sudo nixos-rebuild dry-run --flake .#dracula  # Dry run
+sudo nixos-rebuild build --flake .#nixos-diego    # Test build without switching
+sudo nixos-rebuild dry-run --flake .#nixos-diego  # Dry run
 ```
 
 ### Secret Management
