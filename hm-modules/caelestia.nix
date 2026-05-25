@@ -26,6 +26,7 @@
       };
 
       bar.status.showBattery = true;  # Diego ist Notebook (Strix Halo) — Battery anzeigen
+      bar.status.showKbLayout = true; # Plan-0016 — DE/US Indikator + Click-Switch-Popout (Caelestia-Upstream-Feature)
 
       # SNI tray icon substitutions
       #   - chrome_status_icon_1: Discord-Electron sendet keinen Icon-Namen

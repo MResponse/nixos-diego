@@ -139,8 +139,16 @@ in
       monitor = ",highres@highrr,auto,auto";
 
       input = {
-        # Frage 3: kb_layout = de only, kein caps:escape, kein Toggle
-        kb_layout = "de";
+        # Multi-Layout DE+US (Plan-0016 / ADR-0036, Iteration 2026-05-25).
+        # Default-Layout = DE (erstes Element). Toggle ist NICHT mehr
+        # via XKB-Option grp:alt_shift_toggle (Doom-Emacs-Konflikt mit
+        # linke-Alt+Shift+<key>), sondern via Hyprland-bind weiter unten:
+        # MOD5 SHIFT, K → AltGr+Shift+K. AltGr ist auf DE die rechte Alt;
+        # in Doom Emacs ist AltGr nicht Meta, daher konfliktfrei.
+        # Caelestia-Bar zeigt aktiven State (showKbLayout in caelestia.nix)
+        # und das Bar-Element ist Click-to-Switch (Fallback wenn auf
+        # US-Layout: AltGr existiert dort nicht als MOD5).
+        kb_layout = "de,us";
         follow_mouse = 1;
         repeat_rate = 50;
         repeat_delay = 400;
@@ -356,6 +364,9 @@ in
 
         # System Toggles (Ctrl+Alt-Namespace, Frage 4.13)
         "CTRL ALT, T, exec, darkman toggle"                                                  # darkman dark/light
+        # XKB-Layout-Toggle DE↔US: AltGr+Shift+K (MOD5=AltGr/rechte Alt auf DE,
+        # konfliktfrei mit Doom Emacs Meta-Bindings). Plan-0016 / ADR-0036.
+        "MOD5 SHIFT, K, exec, hyprctl switchxkblayout all next"
 
         # Password Manager (Frage 4.18 — Custom für KeePassXC statt donvini's wofi-pass)
         # Moved from $mod+P → $mod+SHIFT+K so $mod+P is free for `power-mode cycle`
