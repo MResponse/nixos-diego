@@ -1,0 +1,9 @@
+# Plan-0015 / ADR-0035 — diese Datei existiert NUR auf branch `diego`.
+# Verhindert dass `git merge master` (oder `git pull upstream master`)
+# die diego-spezifische CLAUDE.md mit dem upstream-dracula-Wording
+# ueberschreibt.
+#
+# Voraussetzung: der `ours`-merge-Driver muss als Befehl registriert
+# sein. hm-modules/git.nix tut das via
+# `programs.git.settings.merge.ours.driver = "true"`.
+CLAUDE.md merge=ours

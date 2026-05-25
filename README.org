@@ -1,17 +1,86 @@
-#+TITLE: NixOS Configuration
-#+DESCRIPTION: Flake-based NixOS config for a desktop (dracula) and home server (alucard)
+#+TITLE: NixOS Configuration — nixos-diego
+#+DESCRIPTION: Flake-based NixOS config for an HP ZBook Ultra G1a laptop ("nixos-diego"). Forked from donvini94/nixos-config.
 
 * Overview
 
-Flake-based NixOS configuration managing two systems:
-- *dracula* — Desktop workstation (AMD CPU, NVIDIA GPU, Hyprland + caelestia-shell)
-- *alucard* — Home server (Hetzner OpenStack VM, nginx reverse proxy, Docker media stack)
+This is *MResponse's fork* of [[https://github.com/donvini94/nixos-config][donvini94/nixos-config]]. The fork adds a third host
+=nixos-diego= — an HP ZBook Ultra G1a 14" laptop — while preserving
+upstream's =dracula= (desktop) and =alucard= (server) hosts on branch
+=master=.
+
+** Branch Model
+
+- *=master=* — Mirror of upstream =donvini94/nixos-config=. Inherits the
+  upstream =dracula= and =alucard= hosts. *Not built on this machine.*
+- *=diego=* — Live reality on the laptop. Adds the =nixos-diego= host
+  plus all laptop-specific modules and features. This is what the
+  machine actually runs.
+
+A cross-host-switch-guard module (=modules/hostname-safety.nix=,
+ADR-0035) refuses =nixos-rebuild switch= to any host whose =hostName=
+doesn't match the running =$(hostname)= — protects against accidentally
+activating =dracula= or =alucard= on the laptop.
+
+** Hosts
+
+| Host          | Role                          | Hardware                                                | Built here |
+|---------------+-------------------------------+---------------------------------------------------------+------------|
+| =nixos-diego= | Laptop (this machine)         | HP ZBook Ultra G1a 14", Ryzen AI Max+ PRO 395, Radeon 8060S iGPU — *AMD only, no NVIDIA* | yes        |
+| =dracula=     | Upstream desktop workstation  | AMD CPU + NVIDIA GPU                                    | no         |
+| =alucard=     | Upstream home server          | Hetzner OpenStack VM                                    | no         |
 
 The flake provides two host-builder functions:
 - =mkDesktopHost "hostname"= — Full desktop with Hyprland, home-manager, sops, hosts blocking
 - =mkServerHost "hostname"= — Minimal server (host imports what it needs)
 
-For detailed architecture and module documentation, see [[file:CLAUDE.md][CLAUDE.md]].
+For module-level architecture notes see [[file:CLAUDE.md][CLAUDE.md]].
+
+* What the =diego= branch adds on top of upstream
+
+=nixos-diego= layers laptop, gaming, and VR features on top of the
+upstream desktop stack. Highlights:
+
+** Session model
+- *Hyprland under UWSM* (ADR-0017) — required so the SteamOS session-
+  switching machinery (=steamosctl switch-to-{game,desktop}-mode=)
+  finds the compositor's =graphical-session.target=.
+- *Two-session split* (ADR-0029): Hyprland for desktop / VR / RTS use;
+  Gamescope for single-player Gaming-Mode (=SUPER+G= toggles).
+- *Gamescope-bound power-mode service* — auto Performance-profile while
+  in Gaming Mode, auto-restore on exit.
+
+** Auth & input
+- *Fingerprint login* (Synaptics WBF) — wired into SDDM, =sudo=, and
+  KeePassXC Quick Unlock.
+- *KeePassXC TPM2 auto-unlock* (Plan-0014) — KeePassXC master password
+  is sealed to the machine's TPM2 chip; on login KeePassXC opens
+  without prompting. Graceful fallback to interactive prompt if no
+  sealed credentials exist or TPM2 fails.
+- *Qylock SDDM theme bundle* with custom patches:
+  - Wayland-cursor fix in =qylock-random= wrapper.
+  - =acceptedButtons: NoButton= on sub-theme MouseAreas (29 themes) so
+    clicks fall through to the password field.
+  - PAM =informationMessage= handler injected into 18 single-line
+    themes so the "Place finger on sensor" prompt is visible at the
+    greeter.
+
+** VR & gaming
+- SteamVR + Steam Link + Pico 4 stack with =CAP_SYS_NICE= re-apply on
+  every SteamVR update (works around the Jovian =pkexec= stub
+  no-op'ing the original setcap call, ADR-0027).
+- Firewall holes for Steam-Link-VR (UDP 10400/10401, TCP 27037).
+- RADV cleanup (ADR-0028): =video_encode,sam= replaces the upstream
+  =gpl,nggc,sam= — =gpl= and =nggc= are Mesa-default on RDNA 3.5+;
+  =video_encode= is required for HEVC hardware-encode for Steam-Link.
+- PipeWire low-latency =quantum=256= for VR audio.
+
+** Safety nets
+- Cross-host-switch-guard (ADR-0035, see Branch Model above).
+- =stevenBlackHosts.blockSocial= carve-outs for WhatsApp Web and Reddit
+  — the upstream blocklist otherwise sinkholes them silently.
+
+The full plan/ADR history (Plan-0001 .. Plan-0015) is in the commit
+messages on branch =diego=.
 
 * Repository Structure
 
@@ -21,125 +90,83 @@ For detailed architecture and module documentation, see [[file:CLAUDE.md][CLAUDE
 ├── configuration.nix         # Shared base config (shells, locale, gnupg, nix settings)
 ├── home.nix                  # Home-manager import manifest
 ├── modules/                  # Shared system-level modules
-│   ├── desktop.nix           #   Meta-module: imports all desktop sub-modules + PAM + hosts blocking
-│   ├── nvidia.nix            #   Opt-in: NVIDIA driver, graphics, env vars, container toolkit
-│   ├── hyprland/default.nix  #   Hyprland + GDM + portals
-│   ├── packages.nix          #   System packages shared by ALL hosts (desktop + server)
-│   ├── programming.nix       #   Dev tools needing system integration (Python+CUDA, Rust, Emacs)
+│   ├── desktop.nix           #   Meta-module: imports desktop sub-modules + PAM + hosts blocking
+│   ├── nvidia.nix            #   Opt-in: NVIDIA driver/graphics/env/container toolkit (not used by diego)
+│   ├── hyprland/default.nix  #   Hyprland + portals (UWSM enabled where required)
+│   ├── hostname-safety.nix   #   Cross-host-switch-guard (ADR-0035)
+│   ├── packages.nix          #   System packages shared by ALL hosts
+│   ├── programming.nix       #   Dev tools needing system integration
 │   ├── services.nix          #   Pipewire, rtkit, Emacs daemon, printing, Mullvad
 │   ├── fonts.nix             #   Font definitions
-│   └── gaming.nix            #   Opt-in: Steam, Proton, Wine, GameMode
+│   └── gaming.nix            #   Opt-in: Steam, Proton, Wine
 ├── hm-modules/               # Home-manager user-level modules (one file per tool)
-│   ├── git.nix               #   Git identity
-│   ├── ssh.nix               #   SSH config + control master sockets
-│   ├── fish.nix              #   Fish shell + abbreviations
-│   ├── shell.nix             #   Bash, zoxide, direnv, atuin
-│   ├── caelestia.nix         #   Desktop shell config + runtime dependencies
-│   ├── services.nix          #   User services (udiskie, syncthing, mpd, gammastep)
-│   ├── packages.nix          #   User-level packages (dev tools, writing, communication)
+│   ├── git.nix, ssh.nix, fish.nix, shell.nix
 │   ├── hyprland.nix          #   Keybinds, window rules, input config
-│   ├── doom.nix              #   Doom Emacs symlink setup
-│   └── helix, kitty, mpv, starship, yazi, zathura, zellij  # Per-tool configs
+│   ├── caelestia.nix         #   Desktop shell (Quickshell) config + runtime deps
+│   ├── services.nix          #   User services (udiskie, syncthing, mpd, gammastep)
+│   ├── packages.nix          #   User-level packages
+│   ├── keepassxc-fp-unlock.nix  # TPM2 auto-unlock wrapper (Plan-0014)
+│   ├── warp-terminal.nix     #   Warp Terminal keybindings symlink
+│   └── helix, kitty, mpv, starship, yazi, zathura, zellij, doom
 ├── hosts/
-│   ├── dracula/              # Desktop workstation
-│   │   ├── default.nix       #   Import manifest + hostname + user + stateVersion
-│   │   ├── hardware.nix      #   Boot, filesystems, CPU (AMD), peripherals
-│   │   └── services.nix      #   Jellyfin, Docker, OBS, host-specific packages
-│   └── alucard/              # Home server
-│       ├── default.nix       #   Base system, Hetzner mount, scheduled tasks
-│       ├── disk-config.nix   #   Disko BTRFS partitioning
-│       ├── networking.nix    #   Firewall, SSH, fail2ban
-│       ├── services.nix      #   Nginx, Keycloak, Jellyfin, Navidrome, Paperless
-│       ├── media.nix         #   Docker media automation stack
-│       ├── syncthing.nix     #   Syncthing devices and folders
-│       └── users.nix         #   User accounts and SSH keys
+│   ├── nixos-diego/          # THIS machine (HP ZBook Ultra G1a)
+│   │   ├── default.nix       #   Import manifest + identity
+│   │   ├── hardware.nix      #   Boot, filesystems, peripherals
+│   │   ├── diego-options.nix #   Host-specific NixOS options
+│   │   ├── services.nix      #   Host services
+│   │   ├── security.nix      #   PAM, fingerprint, sudo
+│   │   ├── gaming.nix        #   Steam, Jovian, RADV tuning
+│   │   ├── gamescope-power.nix # Gamescope-session-target power-mode binding
+│   │   ├── power-modes.nix   #   Power-profile management
+│   │   ├── qylock-themes.nix #   SDDM theme bundle with patches
+│   │   └── vr.nix            #   SteamVR + Steam Link + Pico 4 stack
+│   ├── dracula/              # Upstream desktop — kept for branch-master compatibility
+│   └── alucard/              # Upstream server — kept for branch-master compatibility
 ├── secrets/                  # sops-nix encrypted secrets (age)
 ├── doom/                     # Doom Emacs config (org-tangle based)
-├── scripts/                  # Helper scripts
+├── scripts/                  # Helper scripts (verify-auth.sh, etc.)
 └── wallpapers/               # Desktop wallpapers
 #+end_src
 
-* Desktop (dracula)
-
-| Component       | Tool                                          |
-|-----------------+-----------------------------------------------|
-| Window manager  | Hyprland                                      |
-| Desktop shell   | caelestia-shell (bar, notifications, launcher, lock, OSD) |
-| Editor          | Doom Emacs, Helix                             |
-| Terminal        | Kitty                                         |
-| Shell           | Fish (with direnv, zoxide, atuin, starship)   |
-| File manager    | Yazi (TUI), Thunar (GUI)                      |
-| PDF viewer      | Zathura                                       |
-| Media           | mpv                                           |
-| VPN             | Mullvad                                       |
-
-* Server (alucard)
-
-Hetzner OpenStack VM with nginx reverse proxies, ACME/Let's Encrypt, and Keycloak authentication.
-
-Domains: =dumusstbereitsein.de=, =istbereit.de=
-
-** Native NixOS Services
-
-| Service    | Description              | Domain                           |
-|------------+--------------------------+----------------------------------|
-| Keycloak   | SSO authentication       | auth.dumusstbereitsein.de        |
-| Jellyfin   | Media streaming          | stream.dumusstbereitsein.de      |
-| Navidrome  | Music streaming          | music.dumusstbereitsein.de       |
-| Calibre-Web| E-book library           | read.istbereit.de                |
-| Paperless  | Document management      | paperless.dumusstbereitsein.de   |
-| Coder      | Code-server              | coder.istbereit.de               |
-| Syncthing  | File synchronization     | (local network)                  |
-
-** Docker Media Automation Stack
-
-| Service      | Purpose             |
-|--------------+---------------------|
-| Sonarr       | TV show automation  |
-| Radarr       | Movie automation    |
-| Prowlarr     | Indexer management  |
-| Bazarr       | Subtitle management |
-| qBittorrent  | Torrent client      |
-| SABnzbd      | Usenet downloader   |
-| Gluetun      | VPN tunnel (Mullvad)|
-| Jellyseerr   | Media requests      |
-
-See [[file:hosts/alucard/MEDIA_AUTOMATION_SETUP.md][MEDIA_AUTOMATION_SETUP.md]] for the full media stack documentation.
-
-* Build Commands
+* Building
 
 #+begin_src bash
-# Desktop
-sudo nixos-rebuild switch --flake .#dracula
+# nixos-diego (the laptop — what you'd actually build here)
+sudo nixos-rebuild switch --flake .#nixos-diego
 
-# Server
-sudo nixos-rebuild switch --flake .#alucard
+# Or use the fish abbreviation (auto-substitutes $(hostname)):
+#   switch        → nixos-rebuild switch --flake ~/nixos-config#$(hostname)
+#   boot          → same with `boot` action
+#   test-switch   → same with `test` action
 
-# Test build (no switch)
-sudo nixos-rebuild build --flake .#dracula
+# Test build without switching
+sudo nixos-rebuild build --flake .#nixos-diego
 
-# Update flake inputs
+# Flake management
 nix flake update
-
-# Check / show flake
 nix flake check
 nix flake show
 #+end_src
 
+The cross-host-switch-guard will refuse a =switch=/=test= action if the
+target host's =hostName= doesn't match =$(hostname)=. To bypass on
+purpose (e.g. =nix build= for a different host's closure, no
+activation), use =build= instead of =switch=.
+
 * Secret Management
 
-Uses [[https://github.com/Mic92/sops-nix][sops-nix]] with age encryption. Three recipient keys (desktop, server, macbook).
+Uses [[https://github.com/Mic92/sops-nix][sops-nix]] with age encryption.
 
 #+begin_src bash
 sops secrets/dmbs.yaml    # Edit encrypted secrets
 #+end_src
 
-Config files: [[file:.sops.yaml][.sops.yaml]], [[file:secrets/secrets.nix][secrets.nix]], [[file:secrets/dmbs.yaml][dmbs.yaml]]
+Config files: =.sops.yaml=, =secrets/secrets.nix=, =secrets/dmbs.yaml=.
 
 * Adding a New Desktop Host
 
 #+begin_src nix
-# 1. In flake.nix, add one line:
+# 1. flake.nix — one line:
 newhost = mkDesktopHost "newhost";
 #+end_src
 
@@ -162,7 +189,6 @@ mkdir -p hosts/newhost
   users.users."${username}" = {
     isNormalUser = true;
     extraGroups = [ "networkmanager" "wheel" ];
-    packages = with pkgs; [ firefox ];
   };
   system.stateVersion = "24.11";
 }
@@ -178,12 +204,10 @@ nixos-generate-config --show-hardware-config > hosts/newhost/hardware.nix
 sudo nixos-rebuild switch --flake .#newhost
 #+end_src
 
-* Adapting This Config
+* Credits
 
-1. Fork and clone
-2. Create your host under =hosts/<name>/= following the pattern above
-3. Enable/disable opt-in modules (=nvidia.nix=, =gaming.nix=) as needed
-4. For a server: adapt =hosts/alucard/= — each file is self-contained
-5. Set up your own sops-nix age keys in =.sops.yaml= and re-encrypt secrets
-
-See [[file:CLAUDE.md][CLAUDE.md]] for detailed architecture notes and module documentation.
+- Upstream: [[https://github.com/donvini94/nixos-config][donvini94/nixos-config]] — the original desktop+server flake
+  this fork is built on. Branch =master= tracks upstream.
+- Desktop shell: [[https://github.com/caelestia-dots/shell][caelestia-shell]] (Quickshell-based).
+- See [[file:CLAUDE.md][CLAUDE.md]] for detailed architecture notes and module
+  documentation.
