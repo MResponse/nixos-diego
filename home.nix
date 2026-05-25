@@ -15,6 +15,7 @@
     ./hm-modules/helix.nix
     ./hm-modules/hyprland.nix
     ./hm-modules/kitty.nix
+    ./hm-modules/warp-terminal.nix
     ./hm-modules/mpv.nix
     ./hm-modules/packages.nix
     ./hm-modules/starship.nix
