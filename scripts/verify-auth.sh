@@ -40,7 +40,7 @@ else
 fi
 
 echo
-echo "═══ V2: qylock Theme-Patches (Plan-0012 F1 + Plan-0013 F1.1/F4) ═══"
+echo "═══ V2: qylock Theme-Pool + Patches (Plan-0017) ═══"
 ACTIVE=""
 if [ -L /run/current-system/sw/share/sddm/themes/field ]; then
   ACTIVE=$(dirname "$(readlink -f /run/current-system/sw/share/sddm/themes/field 2>/dev/null)")
@@ -52,8 +52,8 @@ else
   bad "ACTIVE qylock pool not found (Plan-0004 broken?)"
   ACTIVE="/dev/null"
 fi
-miss_ab=0; miss_im=0; total=0
-miss_ab_list=""; miss_im_list=""
+miss_ab=0; miss_cs=0; total=0
+miss_ab_list=""; miss_cs_list=""
 for d in "$ACTIVE"/*/; do
   [ -d "$d" ] || continue
   [ "$(basename "$d")" = "qylock-random" ] && continue
@@ -62,20 +62,42 @@ for d in "$ACTIVE"/*/; do
     miss_ab=$((miss_ab+1))
     miss_ab_list="$miss_ab_list $(basename "$d")"
   fi
-  if ! grep -q "function onInformationMessage" "$d/Main.qml" 2>/dev/null; then
-    miss_im=$((miss_im+1))
-    miss_im_list="$miss_im_list $(basename "$d")"
+  if ! grep -q "cursorShape:.*Qt.ArrowCursor" "$d/Main.qml" 2>/dev/null; then
+    miss_cs=$((miss_cs+1))
+    miss_cs_list="$miss_cs_list $(basename "$d")"
   fi
 done
 if [ "$miss_ab" -eq 0 ]; then
-  ok "F1+F1.1 (acceptedButtons): ALLE $total themes patched"
+  ok "acceptedButtons (Klick-Durchlass): ALLE $total themes"
 else
-  bad "F1+F1.1: $miss_ab/$total themes MISS acceptedButtons-patch:$miss_ab_list"
+  bad "acceptedButtons: $miss_ab/$total themes MISS:$miss_ab_list"
 fi
-if [ "$miss_im" -eq 0 ]; then
-  ok "F4 (onInformationMessage): ALLE $total themes patched"
+if [ "$miss_cs" -eq 0 ]; then
+  ok "cursorShape (sichtbarer Touchpad-Cursor): ALLE $total themes"
 else
-  warn "F4: $miss_im/$total themes MISS onInformationMessage-handler (PAM_TEXT_INFO unsichtbar dort):$miss_im_list"
+  bad "cursorShape: $miss_cs/$total themes MISS:$miss_cs_list"
+fi
+# Plan-0017 — Pool-Größe (23) + die sechs ausgeschlossenen themes müssen weg sein.
+if [ "$total" -eq 23 ]; then
+  ok "Pool-Größe: 23 themes (Plan-0017)"
+else
+  warn "Pool-Größe: $total (Plan-0017 erwartet 23 — qylock-rev geändert? neue themes auf empty-Enter-login-guard + cursor auditen)"
+fi
+excl_present=""
+for f in osu osumania ninja_gaiden star-rail Genshin R1999_2; do
+  [ -e "$ACTIVE/$f" ] && excl_present="$excl_present $f"
+done
+if [ -z "$excl_present" ]; then
+  ok "Ausgeschlossene themes absent (osu/osumania/ninja_gaiden/star-rail/Genshin/R1999_2)"
+else
+  bad "Ausgeschlossene themes PRESENT:$excl_present"
+fi
+# Plan-0017 — wrapper-Overlay rendert PAM_TEXT_INFO ("Place finger") pool-weit;
+# ersetzt das per-theme F4-sed (das nur ~18/27 themes erreichte).
+if grep -q "function onInformationMessage" "$ACTIVE/qylock-random/Main.qml" 2>/dev/null; then
+  ok "Wrapper PAM-info-Overlay vorhanden (Place-finger sichtbar auf ALLEN themes)"
+else
+  bad "Wrapper onInformationMessage-Overlay FEHLT — Place-finger-Prompt pool-weit unsichtbar"
 fi
 
 echo

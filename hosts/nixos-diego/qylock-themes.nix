@@ -12,8 +12,15 @@
 #     deferred per Plan-0004 §5.5.
 #   - `nier-automata` — requires FOT-Rodin Pro DB.otf (copyrighted, not in
 #     repo). Deferred per Plan-0004 §5.5.
+#   - `osu`, `osumania`, `ninja_gaiden`, `star-rail`, `Genshin`, `R1999_2`
+#     — Plan-0017: dropped so every pooled theme cleanly supports the
+#     single-Enter → fingerprint flow (game-gate / empty-Enter login-guard /
+#     two-step reveal). See the per-theme reasons at the exclusion list in
+#     installPhase below.
 #
-# Effective pool: ~31 themes (13 STATIC + 18 VIDEO).
+# Effective pool: 23 themes — all verified single-Enter login + working
+# touchpad cursor + (via the wrapper PAM-info overlay) a visible "Place finger
+# on sensor" prompt.
 #
 # Codec-surface caveat: VIDEO-themes (pixel-rainyroom, forest, …) use
 # `bg.mp4` via QtMultimedia + gst-libav. gst MP4 parser CVE-family runs
@@ -54,6 +61,37 @@ stdenvNoCC.mkDerivation {
       theme=$(basename "$theme_path")
       [ "$theme" = "clockwork" ] && continue
       [ "$theme" = "nier-automata" ] && continue
+      # Plan-0017 — six themes excluded so EVERY pooled theme cleanly supports
+      # the "Enter on empty password → fingerprint" flow with a single Enter
+      # plus a working touchpad cursor (Marius's call 2026-05-31: drop the
+      # offenders rather than carry per-theme login patches). Verified via a
+      # 3-agent adversarial sweep of all sub-themes' Main.qml.
+      #
+      #   osu, osumania      — rhythm-game GATE. Both compute
+      #     `gameMode: config.gameMode !== "menu"`; under this wrapper `config`
+      #     is the EMPTY wrapper theme.conf, so `config.gameMode` is undefined
+      #     → `undefined !== "menu"` is true → gameMode defaults to "game". At
+      #     the login screen `doAction()` then resolves to `showingDiff = true`
+      #     (difficulty selector) instead of `doLogin()`, so Enter shows a game
+      #     instead of logging in — breaking BOTH password and fingerprint.
+      #   ninja_gaiden       — `doLogin()` wraps its sole sddm.login() in
+      #     `if (pwInput.text !== "")` → empty-Enter never arms fprintd.
+      #   star-rail          — `doLogin()` is `if (passIn.text === "")
+      #     { forceActiveFocus } else { sddm.login }` → empty-Enter only
+      #     refocuses, never arms fprintd.
+      #   Genshin, R1999_2   — two-step reveal-gate (loginFormVisible /
+      #     interactionMode default false); the FIRST Enter only unveils the
+      #     form, so the clean single-Enter fingerprint flow doesn't start.
+      #
+      # Reversibility: delete a theme's line below → next switch re-adds it to
+      # the pool (osu/osumania/ninja_gaiden/star-rail would then need their
+      # login guard patched; Genshin/R1999_2 would be two-step again).
+      [ "$theme" = "osu" ] && continue
+      [ "$theme" = "osumania" ] && continue
+      [ "$theme" = "ninja_gaiden" ] && continue
+      [ "$theme" = "star-rail" ] && continue
+      [ "$theme" = "Genshin" ] && continue
+      [ "$theme" = "R1999_2" ] && continue
       mkdir -p "$out/share/sddm/themes/$theme"
       cp -r "$theme_path"/. "$out/share/sddm/themes/$theme/"
 
@@ -93,92 +131,71 @@ stdenvNoCC.mkDerivation {
           /cursorShape:.*Qt\.ArrowCursor/a\        acceptedButtons: Qt.NoButton
         }' "$main_qml" || true
 
-        # Plan-0013 F1.1 — fix-up osumania theme variant. osumania nutzt
-        # ein anderes Pattern als die anderen 28 Sub-Themes:
-        #   - Comment: `// Wayland Fix` (statt `// Wayland Cursor Fix`)
-        #   - MouseArea: one-liner statt multi-line
-        # Plan-0012 F1 sed-Pattern hat osumania still uebersprungen.
-        # Dieser sed-block matcht one-liner MouseArea OHNE acceptedButtons
-        # und ergaenzt es. Idempotent: matcht nur wenn acceptedButtons
-        # noch fehlt.
-        sed -i \
-          's|\(MouseArea { anchors\.fill: parent; cursorShape: Qt\.ArrowCursor;\)\( z: -1 }\)|\1 acceptedButtons: Qt.NoButton;\2|' \
-          "$main_qml" || true
+        # (Plan-0013 F1.1 osumania one-liner-MouseArea fix-up removed in
+        # Plan-0017: osumania is no longer in the pool, and it was the only
+        # theme using the single-line `// Wayland Fix` variant. All 27
+        # remaining themes carry the multi-line `// Wayland Cursor Fix` block
+        # that the F1 sed above already patches.)
 
-        # Plan-0013 F4 — inject onInformationMessage-Handler in Sub-Themes
-        # mit SINGLE-LINE onLoginFailed. SDDM 0.21 sendet PAM_TEXT_INFO
-        # ("Place finger on sensor") via informationMessage-Signal an QML;
-        # qylock-Themes haben aktuell nur onLoginFailed-Handler und
-        # verschlucken die Info-Message. Konsequenz: Marius am Greeter
-        # sieht keine visuelle Indikation dass fprintd scharf ist.
-        #
-        # Pattern: nach jedem `function onLoginFailed(...) { ... }`-Line
-        # (komplettes one-liner, abgeschlossen mit `}` am Zeilenende)
-        # einen neuen `function onInformationMessage(message)`-Handler
-        # appenden. Theme-Variant-Handling: themes nutzen entweder
-        # errorMsg (field-Familie) oder errorMessage (enfield-Familie);
-        # typeof-guard deckt beide ab. Bei drittem Variant (z.B. `status`-
-        # Label) faellt die Message still durch — kein Crash, nur kein
-        # Render.
-        #
-        # WICHTIG: Anchor muss SINGLE-LINE sein. Multi-line-Themes
-        # (osumania, enfield, forest, ...) haben `function onLoginFailed() {`
-        # mit Body auf folgenden Zeilen. Ein Match auf nur `function
-        # onLoginFailed` ohne `}`-End-Anchor wuerde den neuen Handler
-        # INSIDE den Body von onLoginFailed injecten → invalide QML.
-        # Der Regex `function onLoginFailed.*\}[[:space:]]*$` matcht NUR
-        # Zeilen die mit `}` enden — 18 von 29 Sub-Themes.
-        #
-        # Multi-line themes: F4-Handler wird NICHT injected. F1.2-Assert
-        # produziert WARN (kein FAIL) — Marius sieht die "Place finger"
-        # Message nur in 18/29 ≈ 62% der per-greeter-spawn gerollten
-        # themes. Acceptable, da F4 ein UX-Enhancement ist (kein blocker).
-        # Future Plan-0014/0015 koennte multi-line themes mit awk-state-
-        # tracking adressieren.
-        #
-        # Quelle (SDDM canonical pattern): /nix/store/.../sddm-unwrapped-
-        # 0.21.0/share/sddm/themes/maldives/Main.qml hat
-        #   onInformationMessage: { errorMessage.text = message }
-        # → confirmed signal-existence in shipped SDDM.
-        sed -i -E '/function onLoginFailed\([^)]*\)[[:space:]]*\{.*\}[[:space:]]*$/{
-          a\        function onInformationMessage(message) { if (typeof errorMsg !== "undefined") { errorMsg.text = message; } else if (typeof errorMessage !== "undefined") { errorMessage.text = message; } }
-        }' "$main_qml" || true
+        # (Plan-0013 F4 per-theme onInformationMessage sed REMOVED in Plan-0017.
+        # It only matched SINGLE-LINE onLoginFailed handlers, so it reached just
+        # ~18/27 themes — the multi-line themes (dog-samurai, enfield, forest,
+        # girl-coffee, last-of-us, pixel-dusk-city, winter, …) silently dropped
+        # SDDM's PAM_TEXT_INFO "Place finger on sensor". Plan-0017 replaces it
+        # with ONE theme-independent overlay in the qylock-random wrapper
+        # Main.qml (see below: Connections{target:sddm}+fpHint), which renders
+        # the prompt on EVERY sub-theme. Single mechanism, full coverage.)
       fi
     done
 
-    # Plan-0013 F1.2 — Build-time-Assertion: prueft dass die qylock-
-    # sed-Patches in ALLEN Sub-Themes greifen. Wenn ein qylock-upstream-
-    # refactor das Pattern bricht, schlaegt der Build EXPLIZIT fehl statt
-    # silently disfunctional zu sein.
+    # Plan-0017 — Build-time assertions: provable coverage of the two UX
+    # guarantees on every pooled theme (click-through + a visible Wayland
+    # cursor), plus drift tripwires. A future `nix flake update` of the pinned
+    # qylock rev that breaks a sed pattern, changes the theme set, or
+    # re-introduces an excluded theme then FAILS the build loudly instead of
+    # shipping a silently-broken greeter. Watch: Repology RSS for qylock + the
+    # OPERATIONS.md re-pin checklist (re-audit login guards + cursor per rev).
     #
-    # Watch-Mechanism:
-    #   - bei `nix flake update` der qylock-Rev meldet Build patch-loss
-    #   - Repology RSS + monthly Habitica-Reminder in OPERATIONS.md
-    patched=0
-    info_patched=0
+    # (The old F1.2 onInformationMessage per-theme count is gone — that signal
+    # is now rendered by the qylock-random wrapper overlay, asserted separately
+    # after the wrapper is generated, below.)
+    accept_ok=0
+    cursor_ok=0
     total=0
     for d in "$out/share/sddm/themes/"*/; do
       name=$(basename "$d")
       [ "$name" = "qylock-random" ] && continue
       total=$((total+1))
       if grep -q "acceptedButtons: Qt.NoButton" "$d/Main.qml" 2>/dev/null; then
-        patched=$((patched+1))
+        accept_ok=$((accept_ok+1))
       fi
-      if grep -q "function onInformationMessage" "$d/Main.qml" 2>/dev/null; then
-        info_patched=$((info_patched+1))
+      if grep -q "cursorShape:.*Qt\.ArrowCursor" "$d/Main.qml" 2>/dev/null; then
+        cursor_ok=$((cursor_ok+1))
       fi
     done
-    echo "Plan-0013 F1.2: $patched/$total qylock-themes have acceptedButtons-patch (F1+F1.1)"
-    echo "Plan-0013 F1.2: $info_patched/$total qylock-themes have onInformationMessage-handler (F4)"
-    if [ "$patched" -lt "$total" ]; then
-      echo "FAIL: $((total - patched)) themes missed F1/F1.1 acceptedButtons-patch — investigate sed-pattern drift" >&2
+    echo "Plan-0017: pool=$total themes; acceptedButtons(click-through)=$accept_ok; cursorShape(visible cursor)=$cursor_ok"
+    if [ "$accept_ok" -lt "$total" ]; then
+      echo "FAIL: $((total - accept_ok)) themes missed the acceptedButtons:Qt.NoButton patch — F1 sed drift; greeter clicks would be eaten" >&2
       exit 1
     fi
-    if [ "$info_patched" -lt "$total" ]; then
-      echo "INFO: $((total - info_patched)) themes have multi-line onLoginFailed and skip F4 onInformationMessage-patch (PAM_TEXT_INFO will be invisible there). Expected: ~11 multi-line themes." >&2
-      # NICHT fail — F4 ist UX-enhancement, kein blocker. Multi-line
-      # themes haben strukturell anderen Anchor-Bedarf (awk-state-track
-      # statt sed-pattern) — siehe Plan-0013 §F4-Comment.
+    if [ "$cursor_ok" -lt "$total" ]; then
+      echo "FAIL: $((total - cursor_ok)) themes lack a cursorShape Qt.ArrowCursor claim — Wayland cursor would be invisible" >&2
+      exit 1
+    fi
+    # Drift tripwire #1: the six Plan-0017-excluded themes must NOT be pooled.
+    for forbidden in osu osumania ninja_gaiden star-rail Genshin R1999_2; do
+      if [ -d "$out/share/sddm/themes/$forbidden" ]; then
+        echo "FAIL: excluded theme '$forbidden' present in pool — exclusion drift (qylock re-pin re-introduced it?)" >&2
+        exit 1
+      fi
+    done
+    # Drift tripwire #2: the pinned qylock rev yields exactly 23 pooled themes.
+    # A different count means the upstream theme set changed — re-audit every
+    # NEW theme for an empty-Enter login guard AND a login-screen cursor claim
+    # before trusting the pool (Plan-0017 §sweep methodology).
+    if [ "$total" -ne 23 ]; then
+      echo "FAIL: pool has $total themes, expected 23 — qylock rev changed; re-audit new/removed themes (login guard + cursor) per OPERATIONS.md" >&2
+      exit 1
     fi
 
     # Build the pool list from what we just bundled (skip the wrapper-self).
@@ -263,8 +280,59 @@ stdenvNoCC.mkDerivation {
                 }
             }
         }
+
+        // Plan-0017 — universal PAM-info overlay. Renders fprintd's
+        // PAM_TEXT_INFO ("Place finger on sensor"), delivered via SDDM's
+        // informationMessage signal, at the WRAPPER level so the hint shows on
+        // EVERY pooled sub-theme — including the multi-line themes the old
+        // per-theme F4 sed could not reach. The sddm object is an SDDM greeter
+        // root-context property visible here as well as inside the Loaded
+        // sub-theme. Qt signals are multicast, so a sub-theme with its own
+        // onInformationMessage still receives it too — this handler is purely
+        // additive. Verified SAFE-AS-IS by adversarial review (no binding
+        // loop; z:9999 paints over the Loader; signal API confirmed against
+        // SDDM 0.21 shipped themes maldives/maya/elarun).
+        Connections {
+            target: typeof sddm !== "undefined" ? sddm : null
+            function onInformationMessage(message) { fpHint.text = message ? message : "" }
+            function onLoginFailed() { fpHint.text = "" }
+            function onLoginSucceeded() { fpHint.text = "" }
+        }
+        Rectangle {
+            id: fpHintBg
+            z: 9999
+            visible: fpHint.text.length > 0
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 80
+            width: fpHint.implicitWidth + 48
+            height: fpHint.implicitHeight + 28
+            radius: 10
+            color: "#cc000000"
+            border.color: "#40ffffff"
+            border.width: 1
+            Text {
+                id: fpHint
+                anchors.centerIn: parent
+                text: ""
+                color: "white"
+                font.pixelSize: 22
+                font.bold: true
+                style: Text.Outline
+                styleColor: "black"
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
     }
     EOF
+
+    # Plan-0017 — assert the wrapper carries the universal PAM-info overlay.
+    # If a future edit drops it, the "Place finger on sensor" prompt would go
+    # invisible on every theme again — fail the build loudly instead.
+    if ! grep -q "function onInformationMessage" "$out/share/sddm/themes/qylock-random/Main.qml"; then
+      echo "FAIL: qylock-random wrapper is missing the onInformationMessage overlay — fingerprint prompt would be invisible pool-wide" >&2
+      exit 1
+    fi
 
     runHook postInstall
   '';
