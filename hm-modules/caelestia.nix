@@ -141,6 +141,38 @@
     fi
   '';
 
+  # Bootstrap the *dynamic* (wallpaper-derived) colour scheme on a fresh device.
+  #
+  # The active scheme lives in RUNTIME STATE (~/.local/state/caelestia/scheme.json),
+  # NOT in shell.json — the programs.caelestia HM module exposes no scheme option (it
+  # only writes ~/.config/caelestia/{shell,cli}.json; verified against the upstream
+  # hm-module). With nothing seeded, caelestia falls back to a fixed catppuccin/mocha
+  # palette, so a from-scratch rebuild on a new machine would come up static lavender-
+  # blue instead of following the wallpaper.
+  #
+  # We deliberately do NOT try to *derive* colours here: the dynamic scheme needs the
+  # wallpaper thumbnail to already exist (caelestia only ever generates it via
+  # `caelestia wallpaper`, and the shell never auto-picks a wallpaper on first launch),
+  # and at activation time there is no session and no wallpaper yet. Instead we seed the
+  # *intent* — a complete stock-teal palette tagged name="dynamic" (see
+  # caelestia-scheme-seed.json). The shell renders the teal placeholder until the first
+  # wallpaper is chosen; because the scheme is already "dynamic", `caelestia wallpaper`
+  # then auto-derives the Material-You palette from that image. Verified end-to-end:
+  # seed primary 9bd0cc → derived on the first `caelestia wallpaper -f`.
+  #
+  # COPY ONCE, ONLY IF ABSENT — opposite contract to shell.json above (which is re-
+  # seeded every switch). scheme.json is live state we must not clobber: re-seeding on
+  # every rebuild would wipe the wallpaper-derived colours back to teal and fight every
+  # manual `caelestia scheme set`. The guard makes this a one-time fresh-device
+  # bootstrap; existing installs (where scheme.json already exists) are left untouched.
+  home.activation.seedCaelestiaDynamicScheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    scheme="${config.xdg.stateHome}/caelestia/scheme.json"
+    if [ ! -e "$scheme" ]; then
+      run mkdir -p "$(dirname "$scheme")"
+      run install -m 644 ${./caelestia-scheme-seed.json} "$scheme"
+    fi
+  '';
+
   # Caelestia runtime dependencies (donvini-list + Marius additions)
   home.packages = with pkgs; [
     xdg-desktop-portal-gtk
