@@ -434,8 +434,21 @@
     (when (timerp +wslg--redraw-timer)
       (cancel-timer +wslg--redraw-timer))
     (setq +wslg--redraw-timer (run-with-timer 0.5 nil #'redraw-display)))
-  (add-hook 'window-size-change-functions #'+wslg-redraw-after-resize))
+  (add-hook 'window-size-change-functions #'+wslg-redraw-after-resize)
+  (defun +wslg-fix-display ()
+    "Resync frame and repaint after WSLg drag/restore display corruption."
+    (interactive)
+    (let ((f (selected-frame)))
+      (set-frame-parameter f 'fullscreen nil)
+      (sit-for 0.4)
+      (set-frame-parameter f 'fullscreen 'maximized))
+    (run-with-timer 1.0 nil #'redraw-display))
+  (map! "<f12>" #'+wslg-fix-display))
 ;; WSLg frame repaint and maximize fixes:1 ends here
+
+;; [[file:config.org::*Emoji][Emoji:1]]
+(setq emojify-download-emojis-p t)
+;; Emoji:1 ends here
 
 ;; [[file:config.org::*General Settings][General Settings:1]]
 (setq org-directory "~/org/")

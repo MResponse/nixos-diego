@@ -501,12 +501,18 @@ ty is Astral's Rust-based Python type checker and language server (from the Ruff
 #+end_src
 
 ** WSLg frame repaint and maximize fixes
-WSLg's RDP compositor has two long-standing bugs that bite pgtk Emacs on a
+WSLg's RDP compositor has long-standing bugs that bite pgtk Emacs on a
 200% display: a freshly resized/maximized frame can be left partially
 painted — content blitted at the wrong scale, the rest black — until the
 next redisplay (microsoft/wslg#1058), and raising a client frame can undo
 its maximization on pgtk/Wayland (Emacs bug#61710). Repaint shortly after
 any frame size change and keep the server from raising frames.
+
+Dragging/restoring the window with the mouse (especially across monitors
+with different DPI) can additionally desync the Wayland buffer size from
+the RAIL window — the screen then freezes on stale pixels while input
+still works (microsoft/wslg#643 family). =<f12>= runs a blind-pressable
+recovery: un-maximize, re-maximize, repaint.
 #+begin_src emacs-lisp
 (when (string-match-p "wsl" (downcase (system-name)))
   (setq server-raise-frame nil)
@@ -517,7 +523,25 @@ any frame size change and keep the server from raising frames.
     (when (timerp +wslg--redraw-timer)
       (cancel-timer +wslg--redraw-timer))
     (setq +wslg--redraw-timer (run-with-timer 0.5 nil #'redraw-display)))
-  (add-hook 'window-size-change-functions #'+wslg-redraw-after-resize))
+  (add-hook 'window-size-change-functions #'+wslg-redraw-after-resize)
+  (defun +wslg-fix-display ()
+    "Resync frame and repaint after WSLg drag/restore display corruption."
+    (interactive)
+    (let ((f (selected-frame)))
+      (set-frame-parameter f 'fullscreen nil)
+      (sit-for 0.4)
+      (set-frame-parameter f 'fullscreen 'maximized))
+    (run-with-timer 1.0 nil #'redraw-display))
+  (map! "<f12>" #'+wslg-fix-display))
+#+end_src
+
+** Emoji
+Doom's =(emoji +unicode)= module pulls in emojify, whose default
+=emojify-download-emojis-p ask= blocks the daemon with an invisible
+y-or-n-p prompt on a fresh host (triggered by the first org/agenda
+buffer — looks like a frozen Emacs). Download silently instead.
+#+begin_src emacs-lisp
+(setq emojify-download-emojis-p t)
 #+end_src
 
 * Org mode
