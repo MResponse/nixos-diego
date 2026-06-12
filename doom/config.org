@@ -459,9 +459,13 @@ ty is Astral's Rust-based Python type checker and language server (from the Ruff
 ** Theming
 #+begin_src emacs-lisp
 (setq doom-theme 'modus-vivendi-tinted)
-(setq doom-font (font-spec :family "Iosevka" :weight 'normal :size 24)
-      doom-variable-pitch-font (font-spec :family "Iosevka" :size 28)
-      doom-big-font (font-spec :family "Iosevka" :size 32))
+;; On WSL there is no compositor HiDPI scaling (WSLg's Wayland output reports
+;; scale 1 and GDK_SCALE is ignored on pgtk/Wayland), so double the font to
+;; match a 200% display. Desktop hosts keep the original sizes.
+(let ((wsl-scale (if (string-match-p "wsl" (downcase (system-name))) 2 1)))
+  (setq doom-font (font-spec :family "Iosevka" :weight 'normal :size (* 24 wsl-scale))
+        doom-variable-pitch-font (font-spec :family "Iosevka" :size (* 28 wsl-scale))
+        doom-big-font (font-spec :family "Iosevka" :size (* 32 wsl-scale))))
 
 (setq display-line-numbers-type 'relative)
 

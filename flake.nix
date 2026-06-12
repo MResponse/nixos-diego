@@ -53,6 +53,11 @@
     };
 
     emacs-overlay.url = "github:nix-community/emacs-overlay";
+
+    nixos-wsl = {
+      url = "github:nix-community/NixOS-WSL/main";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -69,6 +74,7 @@
       lsfg-vk-flake,
       caelestia-shell,
       emacs-overlay,
+      nixos-wsl,
       ...
     }@inputs:
     let
@@ -142,12 +148,57 @@
           ./hosts/${hostname}
         ];
       };
+
+      # WSL host: editor/toolchain box reproducing the Doom Emacs env.
+      # Cloned from mkDesktopHost but DROPS sops-nix / hyprland / lsfg-vk /
+      # hosts(StevenBlack) / desktop overlays — none apply under WSL. Imports
+      # the nixos-wsl base module (handles boot/init/filesystems) and the
+      # WSL-safe configuration.nix (shells/nix/timezone/i18n only). username is
+      # pinned to "nixos" (NixOS-WSL default user) so home-manager wires
+      # users.nixos = ./home-wsl.nix and the doom out-of-store symlink lands at
+      # /home/nixos/.config/doom -> /home/nixos/nixos-config/doom.
+      mkWslHost = hostname: nixpkgs.lib.nixosSystem {
+        inherit system;
+        specialArgs = { inherit inputs; username = "nixos"; expectedHostname = hostname; };
+        modules = [
+          # Plan-0015 / ADR-0035: cross-host-switch-prevention.
+          ./modules/hostname-safety.nix
+
+          # NixOS-WSL base (boot/init/filesystems handled by this module).
+          nixos-wsl.nixosModules.default
+          {
+            wsl.enable = true;
+            wsl.defaultUser = "nixos";
+          }
+
+          # Shared, WSL-safe base config (shells/nix/timezone/i18n only).
+          ./configuration.nix
+          ./hosts/${hostname}
+
+          # Home-Manager as a NixOS module. NOTE: username is pinned to
+          # "nixos" (NOT `inherit username`, which would resolve to the
+          # let-bound "marius" and conflict with home-manager's own
+          # home.username = users.nixos.name = "nixos", breaking eval and the
+          # doom homeDirectory symlink).
+          home-manager.nixosModules.home-manager
+          {
+            home-manager = {
+              useGlobalPkgs = true;
+              useUserPackages = true;
+              extraSpecialArgs = { inherit inputs mail fullName; username = "nixos"; };
+              backupFileExtension = "hm-backup";
+              users.nixos = import ./home-wsl.nix;
+            };
+          }
+        ];
+      };
     in
     {
       nixosConfigurations = {
         dracula = mkDesktopHost "dracula";
         alucard = mkServerHost "alucard";
 	nixos-diego = mkDesktopHost "nixos-diego";
+        nixos-wsl = mkWslHost "nixos-wsl";
       };
     };
 }
