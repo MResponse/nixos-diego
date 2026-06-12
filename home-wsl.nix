@@ -19,6 +19,15 @@
 # home.username / homeDirectory / stateVersion preserved as in home.nix
 # (stateVersion "23.05"). On NixOS-WSL the default user is `nixos`, so the
 # flake passes username="nixos" and homeDirectory resolves to /home/nixos.
+#
+# ~/org (org-directory fuer Doom/Agenda/Roam) ist KEIN lokales Verzeichnis,
+# sondern ein manuell angelegter Symlink in den Windows-Syncthing-Share:
+#   ~/org -> /mnt/c/Users/acrm/Storage - D/Syncthing2.0/Syncthing_lighteningv1.0/Organisatorisches/org
+# Damit syncen die Org-Dateien ueber die bestehende Syncthing-Topologie
+# (Geraet <-> Phone <-> Geraet) auf alle Hosts. Auf anderen Hosts (z.B.
+# nixos-diego bare metal) denselben Symlink auf den dortigen Syncthing-Pfad
+# anlegen. Eingerichtet 2026-06-12; bei Neuaufsetzen manuell nachziehen:
+#   ln -s "/mnt/c/.../Organisatorisches/org" ~/org
 
 {
   pkgs,
