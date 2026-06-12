@@ -525,14 +525,27 @@ recovery: un-maximize, re-maximize, repaint.
     (setq +wslg--redraw-timer (run-with-timer 0.5 nil #'redraw-display)))
   (add-hook 'window-size-change-functions #'+wslg-redraw-after-resize)
   (defun +wslg-fix-display ()
-    "Resync frame and repaint after WSLg drag/restore display corruption."
+    "Repair the frame after WSLg display corruption (blind-pressable).
+In the hard variant of microsoft/wslg#643 the Wayland configure
+pipeline is wedged: Emacs-side maximize requests are silently ignored,
+so first cycle the RAIL window minimize/restore from the Windows side
+(bin/wslg-window-reset.ps1 via interop), then re-maximize and repaint."
     (interactive)
-    (let ((f (selected-frame)))
-      (set-frame-parameter f 'fullscreen nil)
-      (sit-for 0.4)
-      (set-frame-parameter f 'fullscreen 'maximized))
-    (run-with-timer 1.0 nil #'redraw-display))
-  (map! "<f12>" #'+wslg-fix-display))
+    (start-process "wslg-window-reset" nil
+                   "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+                   "-NoProfile" "-ExecutionPolicy" "Bypass" "-File"
+                   "\\\\wsl.localhost\\NixOS\\home\\nixos\\nixos-config\\bin\\wslg-window-reset.ps1")
+    (run-with-timer 3.0 nil
+                    (lambda ()
+                      (let ((f (selected-frame)))
+                        (set-frame-parameter f 'fullscreen nil)
+                        (sit-for 0.4)
+                        (set-frame-parameter f 'fullscreen 'maximized))
+                      (run-with-timer 1.0 nil #'redraw-display))))
+  ;; M-<f12> faengt die Sequenz ESC <f12> ab (ESC wirkt als Meta-Prefix,
+  ;; wenn man beim Retten erst ESC und direkt danach F12 drueckt).
+  (map! "<f12>" #'+wslg-fix-display
+        "M-<f12>" #'+wslg-fix-display))
 #+end_src
 
 ** Emoji
