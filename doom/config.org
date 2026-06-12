@@ -500,6 +500,26 @@ ty is Astral's Rust-based Python type checker and language server (from the Ruff
       doom-modeline-persp-icon t)
 #+end_src
 
+** WSLg frame repaint and maximize fixes
+WSLg's RDP compositor has two long-standing bugs that bite pgtk Emacs on a
+200% display: a freshly resized/maximized frame can be left partially
+painted — content blitted at the wrong scale, the rest black — until the
+next redisplay (microsoft/wslg#1058), and raising a client frame can undo
+its maximization on pgtk/Wayland (Emacs bug#61710). Repaint shortly after
+any frame size change and keep the server from raising frames.
+#+begin_src emacs-lisp
+(when (string-match-p "wsl" (downcase (system-name)))
+  (setq server-raise-frame nil)
+  (defvar +wslg--redraw-timer nil
+    "Debounce timer for repainting after a frame size change.")
+  (defun +wslg-redraw-after-resize (&rest _)
+    "Schedule a repaint; WSLg leaves resized frames partially painted."
+    (when (timerp +wslg--redraw-timer)
+      (cancel-timer +wslg--redraw-timer))
+    (setq +wslg--redraw-timer (run-with-timer 0.5 nil #'redraw-display)))
+  (add-hook 'window-size-change-functions #'+wslg-redraw-after-resize))
+#+end_src
+
 * Org mode
 ** General Settings
 #+begin_src emacs-lisp

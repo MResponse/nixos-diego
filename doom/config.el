@@ -424,6 +424,19 @@
       doom-modeline-persp-icon t)
 ;; Modeline:1 ends here
 
+;; [[file:config.org::*WSLg frame repaint and maximize fixes][WSLg frame repaint and maximize fixes:1]]
+(when (string-match-p "wsl" (downcase (system-name)))
+  (setq server-raise-frame nil)
+  (defvar +wslg--redraw-timer nil
+    "Debounce timer for repainting after a frame size change.")
+  (defun +wslg-redraw-after-resize (&rest _)
+    "Schedule a repaint; WSLg leaves resized frames partially painted."
+    (when (timerp +wslg--redraw-timer)
+      (cancel-timer +wslg--redraw-timer))
+    (setq +wslg--redraw-timer (run-with-timer 0.5 nil #'redraw-display)))
+  (add-hook 'window-size-change-functions #'+wslg-redraw-after-resize))
+;; WSLg frame repaint and maximize fixes:1 ends here
+
 ;; [[file:config.org::*General Settings][General Settings:1]]
 (setq org-directory "~/org/")
 
