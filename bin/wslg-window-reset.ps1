@@ -19,6 +19,7 @@ public class WslgFix {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
   public struct RECT { public int L, T, R, B; }
   delegate bool EnumWindowsProc(IntPtr h, IntPtr lp);
   public static long Find(string match) {
@@ -37,11 +38,16 @@ if ($hwnd -eq 0) { Write-Output "window not found"; exit 1 }
 [WslgFix]::ShowWindow([IntPtr]$hwnd, 6) | Out-Null   # SW_MINIMIZE
 Start-Sleep -Milliseconds 800
 
-# SW_RESTORE can fail to land in the RAIL layer (window stays parked
-# minimized at huge negative coordinates) — verify and retry.
+# Bare SW_RESTORE can fail to land in the RAIL layer (window stays parked
+# minimized at huge negative coordinates). Empirically reliable:
+# SW_SHOWNORMAL + SetWindowPos with an explicit on-screen rect, verified
+# with retries.
 $restored = $false
 for ($i = 0; $i -lt 5; $i++) {
-  [WslgFix]::ShowWindow([IntPtr]$hwnd, 9) | Out-Null # SW_RESTORE
+  [WslgFix]::ShowWindow([IntPtr]$hwnd, 1) | Out-Null  # SW_SHOWNORMAL
+  Start-Sleep -Milliseconds 500
+  # 0x0040 = SWP_SHOWWINDOW
+  [WslgFix]::SetWindowPos([IntPtr]$hwnd, [IntPtr]::Zero, 100, 100, 1800, 1100, 0x0040) | Out-Null
   Start-Sleep -Milliseconds 900
   $r = New-Object WslgFix+RECT
   [WslgFix]::GetWindowRect([IntPtr]$hwnd, [ref]$r) | Out-Null
