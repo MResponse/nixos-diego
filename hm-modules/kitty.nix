@@ -36,6 +36,17 @@
       "LANG" = "en_US.UTF-8";
     };
     settings = {
+      # Disable kitty's live config-reload watcher. Default 0.1 spawns a
+      # `kitten __watch_conf__` child that — when kitty.conf is a SYMLINK, as it
+      # always is under home-manager (~/.config/kitty/kitty.conf → /nix/store/…) —
+      # mis-watches and recursively inotify-watches all of $HOME (~500k entries),
+      # exhausting fs.inotify.max_user_watches. That starves every other app of
+      # watches; concretely it broke caelestia's scheme.json watch, so the bar
+      # stopped following darkman dark/light toggles (Ctrl+Alt+T). See kitty
+      # issue #10066. A negative value disables the watcher; the config is
+      # immutable nix-store state anyway so live reload buys us nothing. Manual
+      # reload remains available via ctrl+shift+f5 (reload_config_file).
+      auto_reload_config = -1;
       shell = "fish";
       scrollback_lines = 10000;
       scrollback_pager = "nvim -c 'set ft=man' -";
