@@ -30,8 +30,10 @@ in
     ./services.nix
     ./security.nix
     ./power-modes.nix
+    ./ac-power-mode.nix      # AC plugged → performance, unplugged → smart-sense (ADR-0037)
     ./gamescope-power.nix    # Plan-0002 §2.4 — force `performance` while Gamescope is active
     ./vr.nix                 # SteamVR cap + Steam Link VR firewall (ADR-0027)
+    ./tailscale.nix          # Tailscale mesh — diego↔xardas SSH (shared-claude Infrastruktur/Tailscale; ADR-0005 trigger)
   ];
 
   # Five-mode power management replicating HP's Windows myHP modes
@@ -614,6 +616,27 @@ in
     enable = true;
     abrmd.enable = false;
   };
+
+  # Firmware updates via fwupd/LVFS — passive watcher for the PENDING HP
+  # PD-firmware fix. The ZBook G1a's USB-C PD 3.1 firmware is over-sensitive
+  # across the 20V↔28V (SPR↔EPR) boundary: with a 140W EPR charger (e.g. the
+  # Anker Prime A2687) it negotiates 28V/140W, fails to HOLD it, and flaps
+  # AC-online 1→0 → the laptop drains while plugged in. It's an HP EC/PD
+  # firmware bug (reproduces on Windows + Linux; PD negotiation is EC-autonomous
+  # so Linux can't fix it directly). The fix vehicle is the TI PD firmware
+  # bundled in HP's BIOS capsule (firmware family "X89"). As of 2026-06-04 no
+  # ZBook fix is published: installed X89 01.04.05 (2026-01-19) is the LATEST
+  # for this model AND a known-bad boot-freeze build; the 01.05.01 fix is
+  # EliteBook-X-only; LVFS carries only ≤1.3.0.0 (older than installed) → fwupd
+  # offers nothing today and just sits idle. Value: when HP DOES publish the fix
+  # to LVFS, `fwupdmgr refresh && fwupdmgr update` becomes a one-command,
+  # Windows-free UEFI-capsule flash (Secure Boot is OFF here → no capsule-on-
+  # reboot stall). DO NOT flash any BIOS while charging is unstable / battery
+  # low (brick risk). Workaround meanwhile: daily-drive the HP 140W charger
+  # (verified 0 AC-flips/90s); with the Anker use a NON-EPR cable + lone port to
+  # stay in stable 20V/≤100W SPR. Full rationale: shared-claude
+  # diego-power-charging-profile memory.
+  services.fwupd.enable = true;
 
   system.stateVersion = "25.11";
 }

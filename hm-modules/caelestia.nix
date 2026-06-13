@@ -78,6 +78,18 @@
       };
 
       notifs.expire = true;
+
+      # Strix-Halo PD-flap toast silencer.
+      # The USB-C EPR power contract (28V/140W) briefly COLLAPSES under each APU
+      # power spike: sysfs sampling caught AC line-power dropping offline ~5×/45s
+      # (AC=0 + BAT0=Discharging up to 46W), then re-negotiating. Each collapse
+      # flips UPower.onBattery, and BatteryMonitor.qml:12-26 fires a
+      # "Charger un/plugged" toast PAIR per flip → ~13 toasts/min. This silences
+      # ONLY the charging toast; GameMode/VPN/audio/caps/kbLayout toasts stay on.
+      # NOTE: cosmetic — the real fix is stabilising the PD contract (5A/EPR cable
+      # + HP firmware + lower sustained PL). See diego-power-charging-profile memory.
+      utilities.toasts.chargingChanged = false;
+
       launcher.showOnHover = false;  # Marius
 
       # Plan-0006 F2a — Caelestia-Lockscreen parallel-PAM aktivieren.
