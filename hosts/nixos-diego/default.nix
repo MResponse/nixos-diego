@@ -156,6 +156,22 @@ in
   services.displayManager.sddm = lib.mkIf config.jovian.steam.enable {
     enable = true;
     wayland.enable = true;
+
+    # ── Greeter compositor: weston (NixOS-Default) ──────────────────────
+    # 2026-06-05: Versuch `wayland.compositor = "kwin"` (gegen den unsichtbaren
+    # Cursor) WIEDER ENTFERNT — kwin_wayland funktioniert auf Diego NICHT als
+    # SDDM-Greeter-Compositor: Journal zeigte
+    #   kwin_wayland_drm: drmModeListLessees() failed: Permission denied
+    #   kwin_wayland_drm: Atomic modeset test failed! Permission denied
+    #   kwin_core: Failed to find a working output layer configuration!
+    # → kwin bekam keinen DRM-Master/Atomic-Modeset, malte nur die
+    #   HW-Cursor-Plane (Cursor sichtbar!) aber NICHT die Primary-Plane →
+    #   "Cursor + Rest schwarz". Zusätzlich QQuickView-layer-shell-Konflikt
+    #   (QT_WAYLAND_SHELL_INTEGRATION=layer-shell) → Greeter-Fenster mappte nicht.
+    # Diego rollte 2026-06-05 zurück auf gen-82 (weston). Der Cursor-Fix muss
+    # anders gelöst werden (weston-Software-Cursor o.ä.), NICHT via kwin.
+    # Siehe Memory diego-sddm-cursor-weston-compositor-not-theme.
+
     # Plan-0003 F5: cursor settings live in [Theme] (verified against SDDM
     # source — Configuration.h:80-85 has NO [Wayland] CursorTheme key;
     # Greeter.cpp:104,107 reads mainConfig.Theme.CursorTheme + CursorSize and
@@ -179,6 +195,14 @@ in
       CursorSize  = 24;
     };
   };
+
+  # (2026-06-05: getestet `services.displayManager.environment.WESTON_DISABLE_ATOMIC=1`
+  # gegen den unsichtbaren Cursor — VERWORFEN: erreicht weston gar nicht. Der
+  # sddm-Daemon-Env propagiert NICHT zu weston (weder XCURSOR noch WESTON_*;
+  # weston bekommt wie der Greeter ein gefiltertes Env). Um weston ein Env zu
+  # geben bräuchte es einen compositorCommand-Override mit `env …` davor — und
+  # damit die weston.ini-Keymap-Neuableitung (Plan-0016-Risiko). Cursor-Fix
+  # bleibt offen; siehe Memory diego-sddm-cursor-weston-compositor-not-theme.)
 
   # Plan-0003 F5: system-install Bibata-Modern-Ice so the SDDM greeter
   # (running as user `sddm`) can find it. Matches Marius's GTK cursor theme
