@@ -23,6 +23,8 @@
     ./hm-modules/zathura.nix
     ./hm-modules/doom.nix
     ./hm-modules/zellij.nix
+    ./hm-modules/gaming.nix
+
     ./hm-modules/caelestia.nix
     ./hm-modules/services.nix
     ./hm-modules/keepmenu.nix
