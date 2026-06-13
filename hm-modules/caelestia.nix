@@ -94,7 +94,12 @@
       # Wallpaper-Pfad (Syncthing-Mount). Nur `paths.wallpaperDir` ist im aktuellen
       # Caelestia-Schema gültig — `services.wallpapers.path` wurde entfernt (lebte
       # in einer älteren Version, jetzt unbekannt → "Unknown option in config"-Toast).
-      paths.wallpaperDir = "/home/marius/Syncthing_lighteningv1.0/undefined/Wallpaper/Wallpaper New/dark";
+      # Per-user-neutral so this shared module is safe for BOTH marius and the
+      # acrm work account. config.home.homeDirectory = /home/marius for marius
+      # (byte-identical to the old hardcoded path), /home/acrm for acrm (a
+      # harmless dangling read path — acrm has no Syncthing, so the bar finds
+      # no wallpaper and stays on the seeded dynamic scheme until one is set).
+      paths.wallpaperDir = "${config.home.homeDirectory}/Syncthing_lighteningv1.0/undefined/Wallpaper/Wallpaper New/dark";
     };
     cli = {
       enable = true;

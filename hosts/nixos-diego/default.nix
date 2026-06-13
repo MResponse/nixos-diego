@@ -560,6 +560,42 @@ in
     packages = with pkgs; [ ];
   };
 
+  # ─────────────────────────────────────────────────────────────────────
+  # Second user — acrm (Tier-1 Microsoft 365 work identity).
+  #
+  # Shares the caelestia desktop (same Hyprland-UWSM session as marius) but is
+  # ISOLATED: NOT in `wheel` (no sudo), NOT in `trusted-users` (line ~545 stays
+  # marius-only), NOT in `tss`/`docker`/`libvirtd`. Gets only the desktop
+  # groups needed to actually use the laptop.
+  #
+  # The Microsoft tooling (Edge/Teams/OneDrive) lives in home-acrm.nix →
+  # hm-modules/ms365.nix and — via home-manager.useUserPackages = true — lands
+  # ONLY in /etc/profiles/per-user/acrm, never on marius's PATH. No
+  # services.intune yet (that's Tier-2, pending the Conditional-Access test:
+  # acrm signs Edge into Teams/SharePoint and we see whether CA admits it).
+  #
+  # Wired HERE (not in flake.nix's shared mkDesktopHost) so acrm stays scoped
+  # to THIS host — dracula never gets an acrm HM user and `nix flake check`
+  # stays green. home-manager.users merges with the marius entry from flake.nix
+  # and inherits the same extraSpecialArgs/useUserPackages.
+  # ─────────────────────────────────────────────────────────────────────
+  users.users.acrm = {
+    isNormalUser = true;
+    description = "ACRM (Microsoft 365 work account)";
+    extraGroups = [
+      "networkmanager"
+      "audio"
+      "video"
+      "render" # iGPU access; marius gets it via his other groups
+    ];
+    packages = with pkgs; [ ]; # home-manager owns acrm's packages (home-acrm.nix)
+  };
+
+  # acrm's home-manager config: curated caelestia-desktop subset + ms365.nix.
+  # The global extraSpecialArgs (username/mail/fullName = marius) still flow in,
+  # so home-acrm.nix deliberately ignores those args and hardcodes acrm.
+  home-manager.users.acrm = import ../../home-acrm.nix;
+
   # Plan-0014 — TPM2 fuer KeePassXC initial-unlock ohne Master-PW-Typing.
   # `systemd-creds encrypt --tpm2-device=auto` bindet ein Credential an die
   # TPM2-Hardware (HP ZBook). Disk-stolen Angreifer kann das verschluesselte
