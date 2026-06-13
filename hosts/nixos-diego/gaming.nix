@@ -61,6 +61,18 @@
     };
   };
 
+  # 8BitDo Ultimate 2 Wireless — USB-Device-Node-Zugriff fuer den offiziellen
+  # Web-Firmware-Updater (web.8bitdo.com, WebUSB, nur Chromium). Valve's
+  # 60-steam-input.rules (hardware.steam-hardware via programs.steam) deckt
+  # vendor 2dc8 nur fuer hidraw + uinput ab — WebUSB braucht /dev/bus/usb.
+  # Controller-Betrieb selbst braucht diese Rule NICHT (BT-DInput laeuft
+  # ueber uhid/hidraw); sie existiert rein fuer Firmware-Updates ohne Windows.
+  # Firmware >= v1.03 ist das Gate fuer volle Steam/SDL3-HIDAPI-Unterstuetzung
+  # (Gyro, Back-Buttons, Rumble) ueber Bluetooth.
+  services.udev.extraRules = ''
+    SUBSYSTEM=="usb", ATTRS{idVendor}=="2dc8", TAG+="uaccess"
+  '';
+
   # galileo-mura-extractor (Steam Deck OLED Pixel-Uniformity-Calibration)
   # setuid-root durch Jovian, auf Strix Halo funktionslos — kein OLED-Display,
   # keine Mura-Daten. setuid-Bit weg = keine Privilege-Eskalations-Surface;
