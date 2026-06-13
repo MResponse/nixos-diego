@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Task (Plan-0005 hierarchy)
+# key: task
+# group: Plan-0005 ESTD
+# --
+*** TODO [#${1:B}] ${2:Task name} :Task:$0

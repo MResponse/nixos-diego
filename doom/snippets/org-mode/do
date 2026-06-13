@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Do (Plan-0005 hierarchy)
+# key: do
+# group: Plan-0005 ESTD
+# --
+**** TODO [#${1:B}] ${2:Do description} :Do:$0

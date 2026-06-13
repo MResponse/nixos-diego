@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: ESTD — full Epic/Story/Task/Do skeleton
+# key: estd
+# group: Plan-0005 ESTD
+# --
+* TODO [#${1:B}] ${2:Epic name} :Epic:
+** TODO [#${3:B}] ${4:Story name} :Story:
+*** TODO [#${5:B}] ${6:Task name} :Task:
+**** TODO [#${7:B}] ${8:Do description} :Do:$0

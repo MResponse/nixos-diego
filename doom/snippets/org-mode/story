@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Story (Plan-0005 hierarchy)
+# key: story
+# group: Plan-0005 ESTD
+# --
+** TODO [#${1:B}] ${2:Story name} :Story:$0

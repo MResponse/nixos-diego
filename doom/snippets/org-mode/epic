@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Epic (Plan-0005 hierarchy)
+# key: epic
+# group: Plan-0005 ESTD
+# --
+* TODO [#${1:B}] ${2:Epic name} :Epic:$0
