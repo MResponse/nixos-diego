@@ -22,6 +22,37 @@
 # touchpad cursor + (via the wrapper PAM-info overlay) a visible "Place finger
 # on sensor" prompt.
 #
+# Plan-0018 — USER-SWITCHABILITY guarantee (marius → acrm at the greeter).
+# A per-theme adversarial audit of all 23 pooled Main.qml confirmed EVERY
+# theme is "switcher-works": its single sddm.login() call site submits a
+# username read from a selector the in-theme switcher can mutate per greeter
+# spawn, NOT a hardcoded userModel.lastUser. Two structural families exist,
+# both switchable:
+#   (A) userHelper/userList family (21 themes) — login submits
+#       `userHelper.currentItem.uLogin` (windows_7: `userList.currentItem.uLogin`);
+#       userModel.lastUser appears ONLY as the null-currentItem fallback branch
+#       of the ternary, never as the sole source.
+#   (B) userModel.index family (terraria, wuwa) — login submits
+#       `userModel.data(userModel.index(<switchableIndex>, 0), Qt.UserRole+1)`
+#       where <switchableIndex> is userList.currentIndex (terraria) /
+#       root.userIndex (wuwa); `|| userModel.lastUser` is only the ||-fallback.
+# In both families the SAME variable drives the visible selector and the login
+# arg, so display and submitted login never diverge. Result: on EVERY roll a
+# logged-out person can reach acrm using only that theme's UI + one Enter.
+# Because all 23 already pass, NO theme is dropped and NO login QML is patched
+# (per-theme surgery on a login screen is high-risk; Plan-0017 philosophy:
+# drop offenders rather than patch). The guarantee is locked in by a
+# build-time switchability assert below (drift tripwire #3) that FAILS the
+# build if any pooled theme ever loses its switchable selector or regresses
+# to a lastUser-only login (e.g. a future qylock re-pin).
+#
+# Switch GESTURE is NOT uniform across kept themes — see the per-theme cheat
+# sheet (Plan-0018). Most are "click the displayed username to cycle to the
+# next user" (single click with 2 users = marius→acrm), but a handful open a
+# dropdown / popup list you click a row in (dog-samurai, last-of-us, R1999_1,
+# forest, terraria), and windows_7 uses a "Switch User" Aero pill. All end in:
+# type acrm's password, press Enter once.
+#
 # Codec-surface caveat: VIDEO-themes (pixel-rainyroom, forest, …) use
 # `bg.mp4` via QtMultimedia + gst-libav. gst MP4 parser CVE-family runs
 # pre-login as sddm user on every greeter spawn that rolls a video theme.
@@ -195,6 +226,41 @@ stdenvNoCC.mkDerivation {
     # before trusting the pool (Plan-0017 §sweep methodology).
     if [ "$total" -ne 23 ]; then
       echo "FAIL: pool has $total themes, expected 23 — qylock rev changed; re-audit new/removed themes (login guard + cursor) per OPERATIONS.md" >&2
+      exit 1
+    fi
+
+    # Drift tripwire #3 (Plan-0018): PROVE user-switchability on every roll.
+    # The guarantee "marius can switch to acrm at the greeter on ANY pooled
+    # theme" holds iff every pooled theme's sddm.login() submits a username read
+    # from a per-spawn-mutable selector (NOT a hardcoded userModel.lastUser).
+    # We assert, for each pooled Main.qml, that it (a) has at least one
+    # sddm.login() site, AND (b) references at least one switchable user
+    # selector that the in-theme switcher mutates and the login arg reads:
+    #     userHelper.currentItem        (family A — 21 themes)
+    #     userList.currentItem | userList.currentIndex   (windows_7, terraria)
+    #     userModel.index( root.userIndex | userList.currentIndex )  (family B)
+    # A theme whose login is lastUser-ONLY (the "switcher-broken" decoy) carries
+    # NONE of these markers and so trips this assert. This catches a future
+    # qylock re-pin that rewrites a theme's login to ignore the selector, BEFORE
+    # it ships a greeter where a logged-out person is stuck as marius.
+    switch_re='userHelper\.currentItem|userList\.currentItem|userList\.currentIndex|userModel\.index\([[:space:]]*(root\.)?userIndex|userModel\.index\([[:space:]]*userList\.currentIndex'
+    switch_ok=0
+    for d in "$out/share/sddm/themes/"*/; do
+      name=$(basename "$d")
+      [ "$name" = "qylock-random" ] && continue
+      m="$d/Main.qml"
+      if [ -f "$m" ] \
+         && grep -q "sddm\.login(" "$m" \
+         && grep -Eq "$switch_re" "$m"; then
+        switch_ok=$((switch_ok+1))
+      else
+        echo "FAIL: theme '$name' is not provably user-switchable — its Main.qml lacks a sddm.login() reading a mutable user selector (userHelper/userList.currentItem|userModel.index(<switchableIndex>)). A logged-out person could be stuck as the last user; either patch the theme's switcher or exclude it above (Plan-0018)." >&2
+        exit 1
+      fi
+    done
+    echo "Plan-0018: user-switchable themes=$switch_ok/$total (every pooled theme submits a mutable-selector login, not lastUser-only)"
+    if [ "$switch_ok" -ne "$total" ]; then
+      echo "FAIL: only $switch_ok/$total themes provably user-switchable — switchability drift" >&2
       exit 1
     fi
 
