@@ -12,3 +12,7 @@ result-*
 *~
 .*.swp
 .*.swo
+
+# project-local Claude Code runtime dir (scheduled_tasks.lock etc.) —
+# Claude config is dotfiles-managed, not part of this repo
+.claude/
