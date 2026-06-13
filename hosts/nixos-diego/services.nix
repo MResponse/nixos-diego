@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
 
 {
   virtualisation.docker = {
@@ -22,5 +22,31 @@
     # disabled on Diego (see default.nix), declare it explicitly. Started
     # via Hyprland exec-once in hm-modules/hyprland.nix.
     kdePackages.polkit-kde-agent-1
+
+    # ── Strix-Halo Performance-Diagnostik (ADR-0037-Kontext) ──────────────
+    # amdgpu_top: einziger vollständiger Telemetrie-Pfad auf gfx1151 —
+    # hwmon hat KEIN power1_cap (ROCm #6035), amd-smi/rocm-smi melden N/A.
+    # `amdgpu_top --gpu_metrics` zeigt die Throttler-Status-Bits, die
+    # EC-Power-Cap vs. Thermal vs. Driver unterscheiden (Mess-Rezept:
+    # Diego-OPERATIONS.md §"GPU-Performance am Netzteil").
+    amdgpu_top
+    # vainfo: verifiziert dass radeonsi H264/HEVC/AV1-VAAPI-Decode-Profile
+    # exportiert — Voraussetzung für Hardware-Decode im Remote-Play-Client
+    # (F6-Overlay darf nicht "software decoding" zeigen).
+    libva-utils
+    # ryzenadj: STAPM/SPPT/FPPT-Pilot oberhalb des Charger-Caps (60 W @
+    # HP-140W-Lader; Chip-PL1 66 W → ~6 W sanktionierter Headroom).
+    # Strix-Halo-Support seit v0.17.0 (FlyGoat/RyzenAdj#334); Zugriff via
+    # ryzen_smu-Kernel-Modul (unten) statt /dev/mem — Diego-Kernel hat
+    # CONFIG_IO_STRICT_DEVMEM=y. NICHTS wird automatisch angewendet; das
+    # Rezept inkl. EC-Re-Assert-Check steht in OPERATIONS.md.
+    ryzenadj
   ];
+
+  # SMU-Zugriffspfad für ryzenadj (siehe Paket-Kommentar oben). Das Modul
+  # exponiert nur /sys/kernel/ryzen_smu_drv — passiv bis ryzenadj es nutzt.
+  # nixpkgs-Snapshot 2025-10-22 enthält den Strix-Halo-Support (amkillam/
+  # ryzen_smu PR #31). Revert: beide Zeilen + ryzenadj entfernen.
+  boot.extraModulePackages = [ config.boot.kernelPackages.ryzen-smu ];
+  boot.kernelModules = [ "ryzen_smu" ];
 }
