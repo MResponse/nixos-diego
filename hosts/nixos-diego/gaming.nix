@@ -32,6 +32,59 @@
   # Strix-Halo-Review). RADV-Docs: https://docs.mesa3d.org/drivers/radv.html
   environment.sessionVariables.RADV_PERFTEST = "video_encode,sam";
 
+  # ─────────────────────────────────────────────────────────────────────
+  # Proton-CachyOS (FSR4) — expose to BOTH sessions (ADR-0038 Nachtrag #1)
+  #
+  # modules/gaming.nix delivers proton-cachyos via
+  # `programs.steam.extraCompatPackages`. Both the desktop Steam and the
+  # Jovian Gaming-Mode Steam are FHS/bwrap-wrapped, and BOTH inherit the same
+  # session var STEAM_EXTRA_COMPAT_TOOLS_PATHS=~/.steam/root/compatibilitytools.d
+  # (set by modules/gaming.nix). The divergence is INSIDE the sandbox:
+  # extraCompatPackages bakes STEAM_EXTRA_COMPAT_TOOLS_PATHS=<proton-cachyos
+  # store path> into the fhsenv /etc/profile of `programs.steam.package` (the
+  # DESKTOP build — proton-cachyos is in that build's closure), which
+  # overrides the inherited empty-dir value before Proton is spawned. So
+  # desktop Steam resolves the tool → FSR4 works.
+  #
+  # Jovian's Gaming Mode runs a DIFFERENT, vanilla steam fhsenv build: its
+  # gamescope-session/lib/steamos/steam-launcher `exec`s a SEPARATE steam
+  # derivation whose closure does NOT contain proton-cachyos and whose fhsenv
+  # /etc/profile has an empty injection block. So in Gaming Mode the var stays
+  # at ~/.steam/root/compatibilitytools.d — which was EMPTY → the per-game
+  # forced compat tool (CompatToolMapping → "proton-cachyos-…-x86_64_v3")
+  # fails to resolve → Steam exec's the raw Windows .exe ("cannot execute
+  # binary file") → the game exits instantly → gamescope's xwm aborts on the
+  # resulting X11 I/O error → SIGABRT takes down the whole game-mode session.
+  # (Root-caused + adversarially verified 2026-06-13: console_log.txt:925 the
+  # desktop run executed the proton chain; :1091/:1115 game mode ran the raw
+  # exe; steam closures contain proton-cachyos 1× desktop / 0× game-mode.)
+  #
+  # NB: it is NOT a "wrapped vs bare" difference (both are FHS-wrapped) and
+  # NOT an "env present vs absent" difference (both inherit the same session
+  # var) — it is two DIFFERENT steam derivations, only one of which has
+  # extraCompatPackages baked into its fhsenv /etc/profile.
+  #
+  # Fix: expose the tool through Steam's *native* user compat-tools dir
+  # ~/.steam/root/compatibilitytools.d/, which steamclient.so scans
+  # UNCONDITIONALLY in EVERY launch path (desktop fhsenv + gamepadui),
+  # independent of the env var — exactly like protonup-installed GE builds.
+  # The internal tool name inside compatibilitytool.vdf is unchanged
+  # (proton-cachyos-…-x86_64_v3), so the existing per-game CompatToolMapping
+  # keeps resolving. extraCompatPackages stays as-is (harmless: identical
+  # internal name + store path; kept as the desktop safety net so this change
+  # can't regress the already-working Hyprland path).
+  #
+  # Mechanism = user-instance tmpfiles, NOT system tmpfiles: ~/.steam/root is
+  # a marius-owned symlink → ~/.local/share/Steam, and the system (root)
+  # tmpfiles refuses to canonicalize through it ("unsafe path transition
+  # …owned by marius → owned by root"). Running as the user, and pointing at
+  # the canonical ~/.local/share/Steam path (no symlink in the chain),
+  # sidesteps that entirely. Applies at user-session start; on a live switch
+  # it's created out-of-band the first time, then self-heals every login.
+  systemd.user.tmpfiles.rules = [
+    "L+ %h/.local/share/Steam/compatibilitytools.d/proton-cachyos-fsr4 - - - - ${pkgs.proton-cachyos.steamcompattool}"
+  ];
+
   jovian = {
     steam = {
       enable = true;
