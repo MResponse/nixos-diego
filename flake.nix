@@ -95,6 +95,9 @@
           claude-code = unstablePkgs.claude-code;
           zed-editor = unstablePkgs.zed-editor;
           zen-browser = inputs.zen-browser.packages.${system}.zen-browser;
+          # ADR-0038: CachyOS Proton (Steam compat tool, carries the FSR4
+          # DLL-upgrade path for the 8060S / gfx1151). See pkgs/proton-cachyos.nix.
+          proton-cachyos = final.callPackage ./pkgs/proton-cachyos.nix { };
         })
       ];
 
