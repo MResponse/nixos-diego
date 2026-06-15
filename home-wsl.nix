@@ -20,14 +20,27 @@
 # (stateVersion "23.05"). On NixOS-WSL the default user is `nixos`, so the
 # flake passes username="nixos" and homeDirectory resolves to /home/nixos.
 #
-# ~/org (org-directory fuer Doom/Agenda/Roam) ist KEIN lokales Verzeichnis,
-# sondern ein manuell angelegter Symlink in den Windows-Syncthing-Share:
-#   ~/org -> /mnt/c/Users/acrm/Storage - D/Syncthing2.0/Syncthing_lighteningv1.0/Organisatorisches/org
-# Damit syncen die Org-Dateien ueber die bestehende Syncthing-Topologie
-# (Geraet <-> Phone <-> Geraet) auf alle Hosts. Auf anderen Hosts (z.B.
-# nixos-diego bare metal) denselben Symlink auf den dortigen Syncthing-Pfad
-# anlegen. Eingerichtet 2026-06-12; bei Neuaufsetzen manuell nachziehen:
-#   ln -s "/mnt/c/.../Organisatorisches/org" ~/org
+# Doom nutzt ZWEI Org-Wurzeln, beide als manuell angelegte Symlinks (KEINE
+# lokalen Verzeichnisse), damit sie ueber den jeweiligen Sync-Mechanismus auf
+# andere Hosts kommen:
+#
+#   ~/org      (privat)  -> <Syncthing>/Organisatorisches/privat_org
+#       Syncthing-Topologie (Geraet <-> Phone <-> Geraet). Ist org-directory,
+#       traegt org-roam/anki/reading_list und die Capture-Templates t/n.
+#   ~/org-work (Arbeit)  -> <OneDrive>/Arbeitsordner/AC_Org
+#       OneDrive (amiconsult). Nur Agenda + Capture w/W. Die Doom-Config
+#       (defvar my/org-work-directory) bindet die Work-Wurzel nur ein, wenn
+#       ~/org-work/gtd existiert (file-directory-p-Guard) — auf Hosts ohne
+#       OneDrive bricht also nichts.
+#
+# Konkrete Pfade auf Windows-Diego (2026-06-15):
+#   ln -s   "/mnt/c/Users/acrm/Storage - D/Syncthing2.0/Syncthing_lighteningv1.0/Organisatorisches/privat_org" ~/org
+#   ln -sfn "/mnt/c/Users/acrm/OneDrive - amiconsult GmbH/Arbeitsordner/AC_Org" ~/org-work
+# AC_Org per `attrib +P` als "always keep on this device" gepinnt, sonst
+# dehydriert OneDrive die Dateien zu cloud-only und WSL/Emacs liest ins Leere.
+# Auf anderen Hosts denselben Symlink auf den dortigen Sync-Pfad anlegen.
+# org-agenda-files wird beim Daemon-Start EINMALIG berechnet -> nach neuen
+# gtd-Dateien: systemctl --user restart emacs.service.
 
 {
   pkgs,

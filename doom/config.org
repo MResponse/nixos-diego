@@ -562,6 +562,11 @@ buffer — looks like a frozen Emacs). Download silently instead.
 #+begin_src emacs-lisp
 (setq org-directory "~/org/")
 
+;; Second org root: work context (OneDrive AC_Org). May be absent on hosts
+;; without OneDrive — agenda/capture wire it in only when it actually exists.
+(defvar my/org-work-directory "~/org-work/"
+  "Work org root (OneDrive AC_Org), parallel to the private `org-directory'.")
+
 ;; Agenda files — GTD always, roam only if modified in last 90 days (performance)
 (after! org
   (defun my/recent-org-files (dir &optional days)
@@ -576,7 +581,11 @@ buffer — looks like a frozen Emacs). Download silently instead.
                 (my/recent-org-files (concat org-directory "roam/daily/") 90)
                 (my/recent-org-files (concat org-directory "roam/main/") 90)
                 (my/recent-org-files (concat org-directory "roam/people/") 90)
-                (my/recent-org-files (concat org-directory "roam/meetings/") 90))))
+                (my/recent-org-files (concat org-directory "roam/meetings/") 90)
+                ;; Work GTD (OneDrive AC_Org) — only when the work root exists here
+                (let ((work-gtd (expand-file-name (concat my/org-work-directory "gtd/"))))
+                  (when (file-directory-p work-gtd)
+                    (directory-files-recursively work-gtd "\\.org$"))))))
 
 ;; Flycheck runs `org-lint' on every save, and `org-lint-invalid-id-link'
 ;; rebuilds `org-id-locations' by `file-truename'ing every agenda file.
@@ -817,6 +826,20 @@ The =.+1d/3d= means "at least every day, but shows as overdue after 3 days".
                  entry
                  (file+headline "~/org/gtd/inbox.org" "Capture")
                  "* TODO %?\n  %i\n  %a")))
+
+;; Work capture (OneDrive AC_Org) — only when the work root exists on this host.
+(after! org
+  (when (file-directory-p (expand-file-name my/org-work-directory))
+    (add-to-list 'org-capture-templates
+                 '("w" "Work ToDo"
+                   entry
+                   (file+headline "~/org-work/gtd/inbox.org" "Capture")
+                   "* TODO %?\n  %i\n  %a"))
+    (add-to-list 'org-capture-templates
+                 '("W" "Work Notes"
+                   entry
+                   (file+headline "~/org-work/gtd/notes.org" "Capture")
+                   "* %?\n  %i\n  %a"))))
 
 ;; Close org-capture frame when done
 (defun my/delete-capture-frame (&rest _)
