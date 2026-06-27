@@ -1,4 +1,55 @@
-{ lib, config, pkgs, ... }:
+{ lib, config, pkgs, username, ... }:
+
+let
+  # Declarative seed for lsfg-vk's config. Copied to ~/.config/lsfg-vk/conf.toml
+  # on first login (systemd.user.tmpfiles `C`, see below) and then left
+  # writable so lsfg-vk-ui can edit it — delete the file + `nixos-rebuild
+  # switch` to re-seed from this default.
+  #
+  # `[global].dll` is the one machine-specific bit: the absolute path to the
+  # Lossless Scaling DLL (owned via Steam app 993090). It CANNOT go through the
+  # module's `losslessDLLFile` option — that's deprecated in lsfg-vk v1.0.0 and
+  # only honoured when LSFG_LEGACY is set — so it lives here in [global].dll.
+  #
+  # Profiles are inert until a game opts in with `LSFG_PROCESS=<name> %command%`
+  # (the env var overrides the detected process name so it matches the profile
+  # whose `exe` equals that string). performance_mode + a reduced flow_scale
+  # keep the optical-flow pass light on the 8060S's shared LPDDR5X bandwidth —
+  # the right default for this iGPU; bump flow_scale toward 1.0 per-profile for
+  # quality when a game is light enough to spare the bandwidth.
+  lsfgVkConf = pkgs.writeText "lsfg-vk-conf.toml" ''
+    # SEEDED by NixOS (hosts/nixos-diego/gaming.nix). Writable — edit freely or
+    # via lsfg-vk-ui. Delete + `nixos-rebuild switch` to restore this default.
+
+    [global]
+    dll = "/home/${username}/.local/share/Steam/steamapps/common/Lossless Scaling/Lossless.dll"
+
+    # Activate per-game from Steam (desktop or Gaming-Mode QAM → Properties →
+    # Launch Options):  LSFG_PROCESS=lsfg2 %command%
+    [[profile]]
+    name = "lsfg2"
+    exe = "lsfg2"
+    multiplier = 2
+    flow_scale = 0.75
+    performance_mode = true
+
+    [[profile]]
+    name = "lsfg3"
+    exe = "lsfg3"
+    multiplier = 3
+    flow_scale = 0.75
+    performance_mode = true
+
+    # Quality variant — full flow resolution, heavier. Use for lighter (2D /
+    # older) titles that can spare the bandwidth:  LSFG_PROCESS=lsfg2hq %command%
+    [[profile]]
+    name = "lsfg2hq"
+    exe = "lsfg2hq"
+    multiplier = 2
+    flow_scale = 1.0
+    performance_mode = false
+  '';
+in
 
 {
   # NixOS-Built-in Steam-Wayland-Session deaktivieren (Donvinis modules/gaming.nix
@@ -15,12 +66,56 @@
   # ist das einzig genutzte.
   programs.gamescope.enable = lib.mkForce false;
 
-  # Lossless Scaling Frame Gen (Vulkan-Layer) auf iGPU = Selbst-Kannibalisierung:
-  # CPU+iGPU+FrameGen konkurrieren um die geteilte LPDDR5X-Bandwidth (~256 GB/s).
-  # Plus globaler Vulkan-Layer-Init bei jedem Vulkan-Client (auch Browser, Caelestia).
-  # Auf dGPU sinnvoll, auf Strix-Halo-iGPU netto-negativ — bei Bedarf pro-Spiel
-  # via LSFG_PROCESS=1 reaktivierbar (Layer bleibt im Store).
-  services.lsfg-vk.enable = lib.mkForce false;
+  # ─────────────────────────────────────────────────────────────────────
+  # Lossless Scaling Frame Generation (lsfg-vk) — opt-in, Steam-UI-native.
+  #
+  # This was previously `lib.mkForce false`d here with a bandwidth-
+  # cannibalization argument (CPU+iGPU+FrameGen contending for the shared
+  # ~256 GB/s LPDDR5X bus). That argument is about *running* frame-gen — a
+  # PER-GAME decision — not a reason to withhold the layer wholesale. The
+  # v1.0.0 layer JSON is "type":"GLOBAL" with only a disable_environment
+  # (DISABLE_LSFG=1) and no enable_environment, so the Vulkan loader loads it
+  # into EVERY Vulkan client (games, Caelestia, browsers, acrm's apps); at
+  # init it dlopen's liblsfg-vk.so, parses conf.toml and wraps
+  # vk{Instance,Device}ProcAddr. With NO matching profile that path is a cheap
+  # PASSTHROUGH — no frame-gen work, no bandwidth/heat cost ("inert" = loaded
+  # passthrough, NOT loader-skip). The actual frame-gen workload — and thus the
+  # bandwidth cost — only kicks in for a game that opts in via a launch option.
+  # (Belt-and-suspenders if a desktop client ever shows real passthrough cost:
+  # set DISABLE_LSFG=1 as a session default — that makes the loader truly SKIP
+  # the layer — and per-game use `env -u DISABLE_LSFG LSFG_PROCESS=… %command%`.
+  # Full rationale + open verification points: ADR-0039.)
+  #
+  # So the layer stays *available* in BOTH the Hyprland desktop Steam and the
+  # Jovian Gaming-Mode Steam — the module drops VkLayer_LS_frame_generation.json
+  # into /etc/vulkan/implicit_layer.d/, which both FHS-wrapped Steams (and the
+  # pressure-vessel runtime, --import-vulkan-layers default-on) pick up — while
+  # costing nothing until asked.
+  #
+  # `enable = true` and `ui.enable = true` come from modules/gaming.nix; we
+  # simply DROPPED the old mkForce-false override (no re-statement needed —
+  # restating would just duplicate the upstream value). The machine-specific
+  # DLL path + the opt-in profiles are seeded into conf.toml below.
+  #
+  # PER-GAME USE — identical in desktop Steam and Gaming-Mode QAM (gear →
+  # Properties → Launch Options):
+  #     LSFG_PROCESS=lsfg2 %command%     # 2× frames, perf-mode  (conf.toml)
+  #     LSFG_PROCESS=lsfg3 %command%     # 3× frames
+  #     LSFG_PROCESS=lsfg2hq %command%   # 2× frames, full quality
+  # Audio + the performance overlay stay on the normal Gaming-Mode QAM; the
+  # overlay's FPS counter reports the *generated* rate.
+  #
+  # CAVEAT (upstream Gamescope-Compatibility wiki): cap the game with its OWN
+  # in-game frame limiter (or leave uncapped) — gamescope's frame limiter
+  # fights lsfg-vk. Set the in-game cap near half the panel refresh so the
+  # multiplied output lands on the panel rate.
+  #
+  # lsfg-vk-ui (the GTK config GUI, from ui.enable) runs in the Hyprland
+  # desktop, not inside Gaming Mode — use it to tweak profiles; the per-game
+  # toggle in Gaming Mode is the launch option above.
+  #
+  # Revert: re-add `services.lsfg-vk.enable = lib.mkForce false;` here. The
+  # seeded conf.toml is then harmless dead config.
 
   # RDNA 3.5 (Strix Halo gfx1151) Mesa/RADV-Tuning (Plan-0007 F8, ADR-0028):
   # - video_encode: Vulkan-Video-Encoder für Steam-Link-VR-Streaming (HEVC
@@ -83,6 +178,13 @@
   # it's created out-of-band the first time, then self-heals every login.
   systemd.user.tmpfiles.rules = [
     "L+ %h/.local/share/Steam/compatibilitytools.d/proton-cachyos-fsr4 - - - - ${pkgs.proton-cachyos.steamcompattool}"
+
+    # lsfg-vk config seed (see lsfgVkConf in the let-block + the lsfg-vk comment
+    # above). `d` ensures the dir; `C` copies the seed ONLY if conf.toml does
+    # not exist yet, then leaves it user-writable so lsfg-vk-ui can edit it —
+    # no read-only HM symlink, so no Caelestia-style auto-save conflict.
+    "d %h/.config/lsfg-vk 0755 ${username} users - -"
+    "C %h/.config/lsfg-vk/conf.toml 0644 ${username} users - ${lsfgVkConf}"
   ];
 
   jovian = {
@@ -148,6 +250,16 @@
   boot.kernelParams = [
     "amd_iommu=on"
     "iommu=pt"
+    # Crash-Mitigation (2026-06-26): SMU-Mailbox-Contention zwischen ryzen_smu
+    # (ryzenadj-TDP-Writes) und amdgpu wedget unter Last + AC-Flap die SMU →
+    # `ring gfx_0.0.0 timeout` → GPU-Reset scheitert (braucht die tote SMU) →
+    # `flip_done timed out` → Hard-Freeze (musste per Power-Knopf hart aus).
+    # gpu_recovery=1 erzwingt einen MODE2-Reset-Pfad, der den Hang in einen
+    # *recoverbaren* Reset statt Einfrieren verwandelt — auf genau dieser
+    # Signatur bestätigt (Framework gfx-ring-timeout-Thread, ryzenadj #372).
+    # Verhindert den Wedge NICHT; das eigentliche Root-Cause-Fix (ryzen_smu vs.
+    # amdgpu) ist ein separates Thema — siehe ac-power-mode.nix/gamescope-power.nix.
+    "amdgpu.gpu_recovery=1"
   ];
 
   # Pin the default desktop session for steamos-manager. Without this,
