@@ -1,4 +1,4 @@
-{ lib, config, pkgs, username, ... }:
+{ lib, config, pkgs, username, inputs, ... }:
 
 let
   # Declarative seed for lsfg-vk's config. Copied to ~/.config/lsfg-vk/conf.toml
@@ -25,7 +25,8 @@ let
     dll = "/home/${username}/.local/share/Steam/steamapps/common/Lossless Scaling/Lossless.dll"
 
     # Activate per-game from Steam (desktop or Gaming-Mode QAM → Properties →
-    # Launch Options):  LSFG_PROCESS=lsfg2 %command%
+    # Launch Options):  ENABLE_LSFG=1 LSFG_PROCESS=lsfg2 %command%
+    # (ENABLE_LSFG=1 is required — the layer is opt-in, see gaming.nix comment.)
     [[profile]]
     name = "lsfg2"
     exe = "lsfg2"
@@ -67,41 +68,49 @@ in
   programs.gamescope.enable = lib.mkForce false;
 
   # ─────────────────────────────────────────────────────────────────────
-  # Lossless Scaling Frame Generation (lsfg-vk) — opt-in, Steam-UI-native.
+  # Lossless Scaling Frame Generation (lsfg-vk) — opt-IN Vulkan layer.
   #
-  # This was previously `lib.mkForce false`d here with a bandwidth-
-  # cannibalization argument (CPU+iGPU+FrameGen contending for the shared
-  # ~256 GB/s LPDDR5X bus). That argument is about *running* frame-gen — a
-  # PER-GAME decision — not a reason to withhold the layer wholesale. The
-  # v1.0.0 layer JSON is "type":"GLOBAL" with only a disable_environment
-  # (DISABLE_LSFG=1) and no enable_environment, so the Vulkan loader loads it
-  # into EVERY Vulkan client (games, Caelestia, browsers, acrm's apps); at
-  # init it dlopen's liblsfg-vk.so, parses conf.toml and wraps
-  # vk{Instance,Device}ProcAddr. With NO matching profile that path is a cheap
-  # PASSTHROUGH — no frame-gen work, no bandwidth/heat cost ("inert" = loaded
-  # passthrough, NOT loader-skip). The actual frame-gen workload — and thus the
-  # bandwidth cost — only kicks in for a game that opts in via a launch option.
-  # (Belt-and-suspenders if a desktop client ever shows real passthrough cost:
-  # set DISABLE_LSFG=1 as a session default — that makes the loader truly SKIP
-  # the layer — and per-game use `env -u DISABLE_LSFG LSFG_PROCESS=… %command%`.
-  # Full rationale + open verification points: ADR-0039.)
+  # ROOT CAUSE FIX (2026-06-27, ADR-0039 Nachtrag #1): the upstream v1.0.0
+  # layer JSON ships "type":"GLOBAL" with ONLY a disable_environment
+  # (DISABLE_LSFG=1) and NO enable_environment. Per the Vulkan loader spec an
+  # implicit layer with that shape is ENABLED BY DEFAULT — the loader injects
+  # liblsfg-vk.so into EVERY Vulkan instance unless DISABLE_LSFG is defined.
+  # That includes gamescope-wl itself, the Jovian Gaming-Mode compositor.
+  # gamescope is a Vulkan compositor that scans out directly via DRM/KMS
+  # atomic commits; the frame-gen layer's WSI/present wrappers corrupt that
+  # path, so gamescope's first page-flip fails:
+  #     [gamescope] [Error] drm: flip error: Invalid argument
+  #     [gamescope] [Error] drm: fatal flip error, aborting
+  # → gamescope-wl SIGABRT → the Gaming-Mode session dies → SDDM takes the
+  # screen back → "log into Gaming Mode just bounces straight back to SDDM".
+  # The earlier "inert passthrough, costs nothing" assumption was WRONG for
+  # gamescope: merely LOADING the layer into the compositor breaks scanout,
+  # before any profile match. (MangoHud, right next to it in
+  # implicit_layer.d, coexists with gamescope precisely because it uses the
+  # OPPOSITE polarity — enable_environment MANGOHUD=1, off by default.)
   #
-  # So the layer stays *available* in BOTH the Hyprland desktop Steam and the
-  # Jovian Gaming-Mode Steam — the module drops VkLayer_LS_frame_generation.json
-  # into /etc/vulkan/implicit_layer.d/, which both FHS-wrapped Steams (and the
-  # pressure-vessel runtime, --import-vulkan-layers default-on) pick up — while
-  # costing nothing until asked.
+  # Fix: override services.lsfg-vk.package so the installed manifest uses
+  # enable_environment (ENABLE_LSFG=1) instead of disable_environment. The
+  # module installs cfg.package into BOTH environment.systemPackages and
+  # /etc/vulkan/implicit_layer.d/, so this one override flips both copies. The
+  # layer is now INACTIVE by default — gamescope, Caelestia, browsers, acrm's
+  # apps all run clean — and loads ONLY for a game that opts in. (The package
+  # is reachable as inputs.lsfg-vk-flake.packages.<system>.default; the
+  # --replace-fail substitutions double as a tripwire if upstream changes the
+  # manifest shape.)
   #
-  # `enable = true` and `ui.enable = true` come from modules/gaming.nix; we
-  # simply DROPPED the old mkForce-false override (no re-statement needed —
-  # restating would just duplicate the upstream value). The machine-specific
-  # DLL path + the opt-in profiles are seeded into conf.toml below.
+  # `enable = true` and `ui.enable = true` come from modules/gaming.nix.
+  # The machine-specific DLL path + the opt-in profiles are seeded into
+  # conf.toml below.
   #
   # PER-GAME USE — identical in desktop Steam and Gaming-Mode QAM (gear →
-  # Properties → Launch Options):
-  #     LSFG_PROCESS=lsfg2 %command%     # 2× frames, perf-mode  (conf.toml)
-  #     LSFG_PROCESS=lsfg3 %command%     # 3× frames
-  #     LSFG_PROCESS=lsfg2hq %command%   # 2× frames, full quality
+  # Properties → Launch Options). Note BOTH vars now: ENABLE_LSFG=1 arms the
+  # layer for that process, LSFG_PROCESS picks the conf.toml profile:
+  #     ENABLE_LSFG=1 LSFG_PROCESS=lsfg2 %command%     # 2× frames, perf-mode
+  #     ENABLE_LSFG=1 LSFG_PROCESS=lsfg3 %command%     # 3× frames
+  #     ENABLE_LSFG=1 LSFG_PROCESS=lsfg2hq %command%   # 2× frames, full quality
+  # (Any game previously configured with bare `LSFG_PROCESS=… %command%` must
+  # be updated to prepend `ENABLE_LSFG=1` or it will no longer frame-gen.)
   # Audio + the performance overlay stay on the normal Gaming-Mode QAM; the
   # overlay's FPS counter reports the *generated* rate.
   #
@@ -114,8 +123,34 @@ in
   # desktop, not inside Gaming Mode — use it to tweak profiles; the per-game
   # toggle in Gaming Mode is the launch option above.
   #
-  # Revert: re-add `services.lsfg-vk.enable = lib.mkForce false;` here. The
-  # seeded conf.toml is then harmless dead config.
+  # Revert: drop the package override below (back to the broken-for-gamescope
+  # default) or re-add `services.lsfg-vk.enable = lib.mkForce false;`.
+  #
+  # MECHANISM (verified at runtime via VK_LOADER_DEBUG): the Vulkan loader
+  # treats `disable_environment` as REQUIRED for an implicit layer — removing
+  # it makes the loader skip the layer entirely ("doesn't contain required
+  # layer object disable_environment … skipping"). So we KEEP the required
+  # `disable_environment` (DISABLE_LSFG) and ADD an `enable_environment`
+  # (ENABLE_LSFG) alongside it. With both keys present the layer is opt-in:
+  # loaded only when ENABLE_LSFG is set, force-off when DISABLE_LSFG is set —
+  # the exact polarity MangoHud ships. (Replacing instead of adding the key
+  # would silently break per-game frame-gen for everyone — it merely *looks*
+  # like it fixed gamescope because a skipped layer also can't crash it.)
+  # What keeps gamescope clean: ENABLE_LSFG is set ONLY per-game (in the game's
+  # Steam launch option, applied to the game process), never in gamescope's own
+  # session environment — so the compositor's Vulkan instance never gates the
+  # layer on. Verified at runtime (VK_LOADER_DEBUG, real gamescope binary): no
+  # ENABLE_LSFG → layer NOT loaded into gamescope, no DRM flip, Vulkan inits;
+  # ENABLE_LSFG=1 on a game process → layer loads → frame-gen. (The loader reads
+  # enable/disable_environment with plain getenv, so gamescope being setcap does
+  # NOT itself block it — rely on ENABLE_LSFG staying per-game, MangoHud's model.)
+  services.lsfg-vk.package =
+    inputs.lsfg-vk-flake.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs (old: {
+      postPatch = (old.postPatch or "") + ''
+        substituteInPlace VkLayer_LS_frame_generation.json \
+          --replace-fail '"disable_environment": {' '"enable_environment": { "ENABLE_LSFG": "1" }, "disable_environment": {'
+      '';
+    });
 
   # RDNA 3.5 (Strix Halo gfx1151) Mesa/RADV-Tuning (Plan-0007 F8, ADR-0028):
   # - video_encode: Vulkan-Video-Encoder für Steam-Link-VR-Streaming (HEVC
