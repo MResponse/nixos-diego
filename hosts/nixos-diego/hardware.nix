@@ -25,7 +25,15 @@
       ];
       kernelModules = [ ];
     };
-    kernelModules = [ "kvm-amd" ];
+    # mt7925e: the MediaTek MT7925 (14c3:7925) PCIe Wi-Fi half of the combo
+    # chip intermittently fails to auto-load at boot — udev coldplug doesn't
+    # fire the modalias, leaving ZERO mt7925e lines in dmesg, no wlan netdev
+    # and the PCI device unbound (the Bluetooth half still comes up). A manual
+    # `modprobe mt7925e` always loads it cleanly, so it's a load-timing flake,
+    # not a firmware/device fault. Force-loading it here via systemd-modules-load
+    # (runs well after PCI enumeration) makes Wi-Fi deterministic across boots.
+    # Observed + fixed 2026-06-27.
+    kernelModules = [ "kvm-amd" "mt7925e" ];
     extraModulePackages = [ ];
   };
 
