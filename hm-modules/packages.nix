@@ -83,6 +83,7 @@
     poppler-utils
     glow
     btop
+    geekbench
     pavucontrol
     blueman
     vscodium

@@ -519,7 +519,14 @@ in
   # develop hat PR #8983 gemerged. Overlay greift global (HM keepmenu.nix
   # + system gleich), kein PATH-conflict. Re-pin monthly oder bei Bedarf.
   # Drop overlay wenn nixpkgs 2.8.0 ships → Plan-0007.
-  nixpkgs.overlays = [ (import ../../pkgs/keepassxc-overlay.nix) ];
+  # geekbench 6.7.1 — fixes the Linux result-upload "internal code 35" failure
+  # (stale bundled LibreSSL can't TLS to the now-Cloudflare-fronted Geekbench
+  # Browser; nixpkgs pins the broken 6.4.0). See pkgs/geekbench-overlay.nix.
+  # Drop once nixpkgs ships >= 6.7.1.
+  nixpkgs.overlays = [
+    (import ../../pkgs/keepassxc-overlay.nix)
+    (import ../../pkgs/geekbench-overlay.nix)
+  ];
 
   # (keepassxc ist bereits in services.nix environment.systemPackages —
   # die Overlay-Aenderung greift dort transparent. Polkit-policy-Pfad
