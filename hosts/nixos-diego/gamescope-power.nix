@@ -33,6 +33,29 @@
 
 {
   config = lib.mkIf config.jovian.steam.enable {
+    # Session-active marker dir. Owned by the gaming user so the user-scope
+    # gamescope service can create/remove the marker; root (ac-power-mode)
+    # only reads it.
+    systemd.tmpfiles.rules = [
+      "d /run/diego-gamescope 0755 ${username} users - -"
+    ];
+
+    # NOTE — automated ryzenadj sustained-TDP unlock DELIBERATELY OMITTED.
+    # A 2026-06-26 hard freeze on this machine was an SMU lockup: the kernel
+    # log shows `amd-pmf APMF method call failed` + `SMU response timed out` +
+    # amdgpu `flip_done timed out` cascading for ~90 s. ryzen_smu (ryzenadj's
+    # access path, loaded here) and the in-kernel amd-pmf driver share ONE SMU
+    # mailbox; hammering it from both sides (mode-thrash drives amd-pmf APMF
+    # calls; ryzenadj drives ryzen_smu) can wedge the SMU. An automated 60 s
+    # ryzenadj write DURING a game — while amd-pmf is also active — is exactly
+    # that contention pattern, so it is NOT shipped. The slow-limit 70→81 W
+    # raise stays a MANUAL, piloted step (OPERATIONS.md §"GPU-Performance am
+    # Netzteil": "Erst nach positivem Pilot deklarativ"), and only ever helps
+    # on the HP 140 W brick anyway (the shared Anker EC-caps to ~45 W). The
+    # core fix below — pinning `performance` and stopping the AC-flap
+    # mode-thrash — already delivers the full charger-allowed envelope and
+    # REDUCES amd-pmf/APMF churn.
+
     home-manager.users.${username}.systemd.user.services.diego-gamescope-performance = {
       Unit = {
         Description = "Force performance power mode for the duration of the Gamescope session";
@@ -55,6 +78,16 @@
         # restore-on-stop value.
         ExecStartPre = pkgs.writeShellScript "diego-gamescope-perf-capture" ''
           set -euo pipefail
+
+          # Session-active marker (system-visible, on /run). Two consumers:
+          #   - ac-power-mode.nix reads it and backs off, so AC-online flaps
+          #     during gaming can no longer thrash the mode into smart-sense.
+          #   - the diego-gamescope-tdp.path unit watches it to drive the
+          #     AC-only ryzenadj sustained-TDP unlock.
+          # Created FIRST so it covers the whole session even on the
+          # early-exit path below. Dir owned by us via tmpfiles (see config).
+          : > /run/diego-gamescope/active || true
+
           marker="$XDG_RUNTIME_DIR/diego-prev-power-mode"
           if [ -e "$marker" ]; then
             exit 0
@@ -88,6 +121,11 @@
             *) prev=smart-sense ;;
           esac
           power-mode set "$prev"
+
+          # Session over — drop the marker AFTER restoring the baseline mode,
+          # so ac-power-mode stays backed off until the restore has landed.
+          # The diego-gamescope-tdp loop self-exits on its next tick.
+          rm -f /run/diego-gamescope/active || true
         '';
       };
       Install.WantedBy = [ "gamescope-session.target" ];

@@ -55,6 +55,19 @@ let
     # within this window collapse into one settled-state evaluation.
     sleep 3
 
+    # Gamescope owns the power mode while a Steam Gaming-Mode session runs.
+    # gamescope-power.nix pins `performance` and drops this marker for exactly
+    # the session's lifetime. Under gaming load the HP EC flaps AC-online
+    # 1→0→1 (PD renegotiation, worst on a shared/under-spec charger) — those
+    # are NOT real unplugs. Reacting to them here would thrash the mode into
+    # `smart-sense`, whose amd-pmf TEE policy collapses the iGPU SPL mid-game
+    # (the "GPU <1000 MHz in Gamescope" bug). Skip entirely; the baseline mode
+    # is restored by gamescope-power.nix's ExecStop when the session ends.
+    if [ -e /run/diego-gamescope/active ]; then
+      echo "diego-ac-power-mode: gamescope session active → skip (gamescope owns the mode)"
+      exit 0
+    fi
+
     online=$(cat /sys/class/power_supply/AC/online)
     marker=/run/diego-ac-power-mode/last
 
