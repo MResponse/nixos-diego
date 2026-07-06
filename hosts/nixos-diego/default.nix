@@ -100,10 +100,12 @@ in
   #    udiskie / mpd / gammastep / hyprpaper / mako / syncthing / app-*.scope
   #    from 90 s to 5 s. Syncthing flush-on-SIGTERM completes within 5 s in
   #    typical state; it's crash-tolerant otherwise.
-  systemd.user.extraConfig = ''
-    DefaultTimeoutStopSec=5s
-    DefaultTimeoutAbortSec=3s
-  '';
+  #    (Migrated from `systemd.user.extraConfig` — removed upstream in the
+  #    2026-07 nixpkgs bump in favour of structured settings.)
+  systemd.user.settings.Manager = {
+    DefaultTimeoutStopSec = "5s";
+    DefaultTimeoutAbortSec = "3s";
+  };
 
   # 3. Outer cap on the user manager itself — if the user@1000.service
   #    aggregate stop doesn't complete in 10 s, SIGKILL the whole thing.

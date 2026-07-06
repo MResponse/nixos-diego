@@ -98,6 +98,9 @@ in
 {
   wayland.windowManager.hyprland = {
     enable = true;
+    # home-manager 2026-07 flips the default config renderer to "lua"; this
+    # whole module is written as hyprlang `settings` — pin the legacy renderer.
+    configType = "hyprlang";
     settings = {
       env = [
         # GPU device: Strix Halo AMD iGPU is the only DRM device — let Aquamarine
