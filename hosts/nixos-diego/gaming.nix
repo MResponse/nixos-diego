@@ -6,48 +6,48 @@ let
   # writable so lsfg-vk-ui can edit it — delete the file + `nixos-rebuild
   # switch` to re-seed from this default.
   #
-  # `[global].dll` is the one machine-specific bit: the absolute path to the
-  # Lossless Scaling DLL (owned via Steam app 993090). It CANNOT go through the
-  # module's `losslessDLLFile` option — that's deprecated in lsfg-vk v1.0.0 and
-  # only honoured when LSFG_LEGACY is set — so it lives here in [global].dll.
+  # CONFIG SCHEMA (lsfg-vk v1.0.0 — verified against the layer's own runtime
+  # output, not guessed): the TOML is `version = 1` + `[[game]]` blocks keyed by
+  # `exe` (matched against the process name, overridable per-game via
+  # LSFG_PROCESS), each with `multiplier` and `performance_mode`. (It is NOT
+  # `[[profile]]` / `name` / `flow_scale` — that was an earlier wrong guess that
+  # never actually parsed.) Lossless.dll AUTO-DETECTS when Lossless Scaling sits
+  # in the default Steam library (it does — app 993090), so NO `[global].dll`
+  # path is needed; only set one for a non-default drive.
   #
-  # Profiles are inert until a game opts in with `LSFG_PROCESS=<name> %command%`
-  # (the env var overrides the detected process name so it matches the profile
-  # whose `exe` equals that string). performance_mode + a reduced flow_scale
-  # keep the optical-flow pass light on the 8060S's shared LPDDR5X bandwidth —
-  # the right default for this iGPU; bump flow_scale toward 1.0 per-profile for
-  # quality when a game is light enough to spare the bandwidth.
+  # IMPORTANT — this seed only lands on a FRESH install: the tmpfiles `C` rule
+  # is copy-IF-ABSENT, and lsfg-vk / lsfg-vk-ui write their OWN upstream-default
+  # conf.toml (vkcube/benchmark/Genshin) on first run, which then WINS over this
+  # seed (the layer never sees it). To (re)apply: delete conf.toml and log in
+  # again. Profiles stay inert until a game opts in with
+  # `ENABLE_LSFG=1 LSFG_PROCESS=<exe> %command%`.
   lsfgVkConf = pkgs.writeText "lsfg-vk-conf.toml" ''
     # SEEDED by NixOS (hosts/nixos-diego/gaming.nix). Writable — edit freely or
     # via lsfg-vk-ui. Delete + `nixos-rebuild switch` to restore this default.
 
+    version = 1
+
     [global]
-    dll = "/home/${username}/.local/share/Steam/steamapps/common/Lossless Scaling/Lossless.dll"
 
     # Activate per-game from Steam (desktop or Gaming-Mode QAM → Properties →
     # Launch Options):  ENABLE_LSFG=1 LSFG_PROCESS=lsfg2 %command%
-    # (ENABLE_LSFG=1 is required — the layer is opt-in, see gaming.nix comment.)
-    [[profile]]
-    name = "lsfg2"
+    # ENABLE_LSFG=1 arms the opt-in layer; LSFG_PROCESS overrides the detected
+    # process name to match an `exe` below.
+    [[game]]
     exe = "lsfg2"
     multiplier = 2
-    flow_scale = 0.75
     performance_mode = true
 
-    [[profile]]
-    name = "lsfg3"
+    [[game]]
     exe = "lsfg3"
     multiplier = 3
-    flow_scale = 0.75
     performance_mode = true
 
-    # Quality variant — full flow resolution, heavier. Use for lighter (2D /
-    # older) titles that can spare the bandwidth:  LSFG_PROCESS=lsfg2hq %command%
-    [[profile]]
-    name = "lsfg2hq"
+    # Quality variant (full quality, heavier) for lighter / older titles:
+    #   ENABLE_LSFG=1 LSFG_PROCESS=lsfg2hq %command%
+    [[game]]
     exe = "lsfg2hq"
     multiplier = 2
-    flow_scale = 1.0
     performance_mode = false
   '';
 in
